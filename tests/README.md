@@ -1,2 +1,5 @@
-Host-side emulator regression tests will live here.
+Run the host-side emulator regression tests with:
 
+```sh
+sh tests/run_tests.sh
+```
