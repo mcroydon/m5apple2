@@ -39,7 +39,7 @@ extern const uint8_t dos_3_3_dsk_start[] asm("_binary_dos_3_3_dsk_start");
 extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
 #endif
 
-#define APP_DSK_PROBE_INSTRUCTIONS 750000U
+#define APP_DSK_PROBE_INSTRUCTIONS 900000U
 
 typedef enum {
     APP_DISK_ORDER_DOS33 = 0,

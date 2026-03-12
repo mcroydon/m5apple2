@@ -43,8 +43,9 @@ Current limitations:
 - The Cardputer app now accepts explicit DOS-order `.do` and ProDOS-order `.po`
   images, and probes ambiguous `.dsk` images when the system and Disk II ROMs
   are available.
-- DOS 3.3 boot now reaches the stage-2 entry page at `$3700`, but the later DOS
-  initialization path still falls back to the monitor.
+- DOS 3.3 boot now reaches the stage-2 entry page at `$3700` and the improved
+  stepper model lets the later loader seek off track 0 on the detected
+  ProDOS-order path, but DOS still does not reach the prompt.
 - Built-in Cardputer keyboard matrix scanning is not implemented yet.
 - The display pins and offsets are configurable in `menuconfig`, but the ADV
   profile still needs hardware validation.

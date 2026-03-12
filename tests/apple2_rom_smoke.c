@@ -15,7 +15,7 @@ typedef enum {
     DISK_IMAGE_PO_PRODOS_ORDER,
 } disk_image_type_t;
 
-#define DSK_PROBE_INSTRUCTIONS 750000U
+#define DSK_PROBE_INSTRUCTIONS 900000U
 
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
@@ -170,6 +170,7 @@ int main(void)
     bool entered_boot1 = false;
     bool stage1_preloaded = false;
     bool entered_stage2 = false;
+    bool advanced_loader = false;
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -255,7 +256,16 @@ int main(void)
         if (disk_size != 0U && disk_stage1_preload_complete(&machine, disk, disk_type)) {
             stage1_preloaded = true;
         }
-        if (disk_size != 0U && stage1_preloaded && entered_stage2) {
+        if (disk_size != 0U &&
+            entered_stage2 &&
+            machine.disk2.quarter_track[0] >= 4U &&
+            cpu.pc < 0xFD00U) {
+            advanced_loader = true;
+        }
+        if (disk_size != 0U &&
+            entered_stage2 &&
+            cpu.pc >= 0xFD00U &&
+            machine.disk2.nibble_pos[0] <= 384U) {
             break;
         }
         if (disk_size == 0U && entered_slot6) {
@@ -289,7 +299,17 @@ int main(void)
                 cpu.pc, machine.memory[0x3700], machine.memory[0x3701], machine.memory[0x3702]);
         return 8;
     }
+    if (disk_size != 0U &&
+        (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER) &&
+        !advanced_loader) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        fprintf(stderr,
+                "Disk loader did not seek beyond track 0, pc=%04x qt=%u np=%u type=%d p1d00=%02x\n",
+                cpu.pc, machine.disk2.quarter_track[0], machine.disk2.nibble_pos[0], (int)disk_type,
+                machine.memory[0x1D00]);
+        return 9;
+    }
 
-    puts(disk_size != 0U ? "apple2 ROM+disk stage2 smoke passed" : "apple2 ROM smoke passed");
+    puts(disk_size != 0U ? "apple2 ROM+disk loader smoke passed" : "apple2 ROM smoke passed");
     return 0;
 }

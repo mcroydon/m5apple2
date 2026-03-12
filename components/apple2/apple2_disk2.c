@@ -28,6 +28,13 @@ static const uint8_t s_prodos_track_order[16] = {
     0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
 };
 
+static const int8_t s_stepper_state_for_mask[16] = {
+    -1, 0, 2, 1,
+    4, -1, 3, -1,
+    6, 7, -1, -1,
+    5, -1, -1, -1,
+};
+
 static inline void disk2_encode44(uint8_t value, uint8_t *out_high, uint8_t *out_low)
 {
     *out_high = (uint8_t)(((value >> 1) & 0x55U) | 0xAAU);
@@ -165,25 +172,46 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
 static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool enabled)
 {
     const uint8_t mask = (uint8_t)(1U << phase_index);
-    uint8_t *quarter_track = &disk2->quarter_track[disk2->active_drive];
+    const uint8_t drive = disk2->active_drive;
+    uint8_t *phase_mask = &disk2->phase_mask[drive];
+    uint8_t *quarter_track = &disk2->quarter_track[drive];
+    int8_t *stepper_state = &disk2->stepper_state[drive];
+    const int8_t old_state = *stepper_state;
 
     if (enabled) {
-        if ((disk2->phase_mask & mask) == 0U) {
-            if (disk2->last_phase >= 0) {
-                const uint8_t delta = (uint8_t)((phase_index - disk2->last_phase) & 0x03U);
-                if (delta == 1U && *quarter_track < APPLE2_DISK2_MAX_QUARTER_TRACK) {
-                    (*quarter_track)++;
-                    disk2->track_cache_valid = false;
-                } else if (delta == 3U && *quarter_track > 0U) {
-                    (*quarter_track)--;
-                    disk2->track_cache_valid = false;
+        *phase_mask |= mask;
+    } else {
+        *phase_mask &= (uint8_t)~mask;
+    }
+
+    {
+        const int8_t new_state = s_stepper_state_for_mask[*phase_mask & 0x0FU];
+
+        if (new_state >= 0) {
+            if (old_state >= 0) {
+                const uint8_t delta = (uint8_t)((new_state - old_state) & 0x07U);
+
+                if (delta != 0U && delta != 4U) {
+                    if (delta < 4U) {
+                        uint8_t steps = delta;
+                        while (steps-- != 0U && *quarter_track < APPLE2_DISK2_MAX_QUARTER_TRACK) {
+                            (*quarter_track)++;
+                            disk2->track_cache_valid = false;
+                        }
+                    } else {
+                        uint8_t steps = (uint8_t)(8U - delta);
+                        while (steps-- != 0U && *quarter_track > 0U) {
+                            (*quarter_track)--;
+                            disk2->track_cache_valid = false;
+                        }
+                    }
                 }
             }
-            disk2->last_phase = (int8_t)phase_index;
+
+            *stepper_state = new_state;
+        } else {
+            *stepper_state = -1;
         }
-        disk2->phase_mask |= mask;
-    } else {
-        disk2->phase_mask &= (uint8_t)~mask;
     }
 }
 
@@ -216,10 +244,12 @@ void apple2_disk2_reset(apple2_disk2_t *disk2)
     disk2->active_drive = 0;
     disk2->q6 = false;
     disk2->q7 = false;
-    disk2->phase_mask = 0;
-    disk2->last_phase = -1;
     disk2->data_latch = 0;
     disk2->track_cache_valid = false;
+    memset(disk2->phase_mask, 0, sizeof(disk2->phase_mask));
+    for (unsigned drive = 0; drive < 2U; ++drive) {
+        disk2->stepper_state[drive] = -1;
+    }
     memset(disk2->quarter_track, 0, sizeof(disk2->quarter_track));
     memset(disk2->nibble_pos, 0, sizeof(disk2->nibble_pos));
 }

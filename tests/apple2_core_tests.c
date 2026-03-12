@@ -214,6 +214,27 @@ static void test_drive0_dsk_loading(void)
     assert(!apple2_machine_load_drive0_dsk(&machine, image, sizeof(image) - 1U));
 }
 
+static void test_disk2_stepper_quarter_tracks(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    assert(machine.disk2.quarter_track[0] == 0U);
+    (void)apple2_disk2_access(&machine.disk2, 0x1U); /* phase 0 on */
+    (void)apple2_disk2_access(&machine.disk2, 0x3U); /* phase 1 on */
+    (void)apple2_disk2_access(&machine.disk2, 0x0U); /* phase 0 off */
+    (void)apple2_disk2_access(&machine.disk2, 0x5U); /* phase 2 on */
+    (void)apple2_disk2_access(&machine.disk2, 0x2U); /* phase 1 off */
+    assert(machine.disk2.quarter_track[0] == 4U);
+
+    (void)apple2_disk2_access(&machine.disk2, 0x3U); /* phase 1 on */
+    (void)apple2_disk2_access(&machine.disk2, 0x4U); /* phase 2 off */
+    (void)apple2_disk2_access(&machine.disk2, 0x1U); /* phase 0 on */
+    (void)apple2_disk2_access(&machine.disk2, 0x2U); /* phase 1 off */
+    assert(machine.disk2.quarter_track[0] == 0U);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -224,6 +245,7 @@ int main(void)
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
     test_drive0_dsk_loading();
+    test_disk2_stepper_quarter_tracks();
     puts("apple2 core tests passed");
     return 0;
 }

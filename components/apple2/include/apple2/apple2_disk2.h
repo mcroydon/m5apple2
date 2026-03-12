@@ -21,8 +21,8 @@ typedef struct {
     uint8_t active_drive;
     bool q6;
     bool q7;
-    uint8_t phase_mask;
-    int8_t last_phase;
+    uint8_t phase_mask[2];
+    int8_t stepper_state[2];
     uint8_t quarter_track[2];
     uint32_t nibble_pos[2];
     uint8_t data_latch;
