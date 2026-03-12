@@ -16,4 +16,4 @@ the smoke test also verifies that boot reaches the DOS stage-1 loader at `$0800`
 maps the corresponding track-0 boot pages into `$3600-$3FFF`, and reaches the
 DOS stage-2 entry page at `$3700`. For ProDOS-order images and probed `.dsk`
 images that choose that path, the smoke also verifies that the later loader
-seeks off track 0 instead of immediately falling back to the monitor.
+seeks off track 0 and reaches the DOS 3.3 `]` prompt.

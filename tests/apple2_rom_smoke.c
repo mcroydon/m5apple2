@@ -1,4 +1,5 @@
 #include "apple2/apple2_machine.h"
+#include "apple2/apple2_video.h"
 
 #include <stdbool.h>
 #include <limits.h>
@@ -16,6 +17,7 @@ typedef enum {
 } disk_image_type_t;
 
 #define DSK_PROBE_INSTRUCTIONS 900000U
+#define DOS_PROMPT_INSTRUCTIONS 17000000U
 
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
@@ -153,6 +155,48 @@ static bool disk_stage1_preload_complete(const apple2_machine_t *machine,
     return true;
 }
 
+static bool disk_screen_row_has_prefix(const apple2_machine_t *machine, uint8_t row, const char *prefix)
+{
+    uint16_t address = apple2_text_row_address(false, row);
+
+    while (*prefix != '\0') {
+        if ((machine->memory[address++] & 0x7FU) != (uint8_t)*prefix++) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static bool disk_screen_contains(const apple2_machine_t *machine, const char *text)
+{
+    const size_t length = strlen(text);
+
+    if (length == 0U || length > 40U) {
+        return false;
+    }
+
+    for (uint8_t row = 0; row < 24U; ++row) {
+        const uint16_t base = apple2_text_row_address(false, row);
+        for (uint8_t column = 0; column <= (40U - length); ++column) {
+            bool matched = true;
+
+            for (size_t i = 0; i < length; ++i) {
+                if ((machine->memory[(uint16_t)(base + column + i)] & 0x7FU) != (uint8_t)text[i]) {
+                    matched = false;
+                    break;
+                }
+            }
+
+            if (matched) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
 int main(void)
 {
     FILE *rom_file = fopen("roms/apple2plus.rom", "rb");
@@ -171,6 +215,7 @@ int main(void)
     bool stage1_preloaded = false;
     bool entered_stage2 = false;
     bool advanced_loader = false;
+    bool dos_prompt_ready = false;
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -242,7 +287,13 @@ int main(void)
         }
     }
 
-    for (uint32_t i = 0; i < 1500000U; ++i) {
+    {
+        const bool expect_prodos_prompt =
+            disk_size != 0U &&
+            (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER);
+        const uint32_t instruction_limit = expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 1500000U;
+
+        for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         if (cpu.pc >= 0xC600U && cpu.pc < 0xC700U) {
             entered_slot6 = true;
@@ -268,10 +319,25 @@ int main(void)
             machine.disk2.nibble_pos[0] <= 384U) {
             break;
         }
+        if (expect_prodos_prompt &&
+            cpu.pc >= 0xFD1BU &&
+            cpu.pc <= 0xFD24U &&
+            disk_screen_contains(&machine, "DOS VERSION 3.3")) {
+            for (uint8_t row = 0; row < 24U; ++row) {
+                if (disk_screen_row_has_prefix(&machine, row, "]")) {
+                    dos_prompt_ready = true;
+                    break;
+                }
+            }
+            if (dos_prompt_ready) {
+                break;
+            }
+        }
         if (disk_size == 0U && entered_slot6) {
             break;
         }
         apple2_machine_step_instruction(&machine);
+    }
     }
 
     if (!entered_slot6) {
@@ -309,7 +375,18 @@ int main(void)
                 machine.memory[0x1D00]);
         return 9;
     }
+    if (disk_size != 0U &&
+        (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER) &&
+        !dos_prompt_ready) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        fprintf(stderr,
+                "Disk boot did not reach the DOS prompt, pc=%04x qt=%u np=%u row0=%02x row5=%02x\n",
+                cpu.pc, machine.disk2.quarter_track[0], machine.disk2.nibble_pos[0],
+                machine.memory[apple2_text_row_address(false, 0U)],
+                machine.memory[apple2_text_row_address(false, 5U)]);
+        return 10;
+    }
 
-    puts(disk_size != 0U ? "apple2 ROM+disk loader smoke passed" : "apple2 ROM smoke passed");
+    puts(disk_size != 0U ? "apple2 ROM+disk prompt smoke passed" : "apple2 ROM smoke passed");
     return 0;
 }
