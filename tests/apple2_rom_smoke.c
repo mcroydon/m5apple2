@@ -1,6 +1,7 @@
 #include "apple2/apple2_machine.h"
 
 #include <stdbool.h>
+#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,15 +10,127 @@
 typedef enum {
     DISK_IMAGE_NONE = 0,
     DISK_IMAGE_DSK_DOS_ORDER,
+    DISK_IMAGE_DSK_PRODOS_ORDER,
     DISK_IMAGE_DO_DOS_ORDER,
-    DISK_IMAGE_PO_PHYSICAL_ORDER,
+    DISK_IMAGE_PO_PRODOS_ORDER,
 } disk_image_type_t;
+
+#define DSK_PROBE_INSTRUCTIONS 750000U
+
+static const uint8_t s_prodos_track_order[16] = {
+    0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
+    0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
+};
+
+static unsigned disk_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
+{
+    unsigned nonzero = 0;
+
+    for (uint16_t i = 0; i < size; ++i) {
+        if (machine->memory[(uint16_t)(base + i)] != 0U) {
+            nonzero++;
+        }
+    }
+
+    return nonzero;
+}
+
+static unsigned disk_find_file_sector_for_physical(const uint8_t *track_order, uint8_t physical_sector)
+{
+    for (unsigned file_sector = 0; file_sector < 16U; ++file_sector) {
+        if (track_order[file_sector] == physical_sector) {
+            return file_sector;
+        }
+    }
+
+    return 0U;
+}
+
+static int disk_score_dsk_order(const uint8_t *rom,
+                                size_t rom_size,
+                                const uint8_t *slot6_rom,
+                                size_t slot6_rom_size,
+                                const uint8_t *disk,
+                                size_t disk_size,
+                                bool prodos_order)
+{
+    apple2_machine_t probe;
+    bool entered_stage2 = false;
+
+    apple2_machine_init(&probe, &(apple2_config_t){ .cpu_hz = 1020484U });
+    if (!apple2_machine_load_system_rom(&probe, rom, rom_size) ||
+        (slot6_rom_size != 0U && !apple2_machine_load_slot6_rom(&probe, slot6_rom, slot6_rom_size))) {
+        return INT_MIN / 2;
+    }
+    if (!(prodos_order
+              ? apple2_machine_load_drive0_po(&probe, disk, disk_size)
+              : apple2_machine_load_drive0_dsk(&probe, disk, disk_size))) {
+        return INT_MIN / 2;
+    }
+
+    for (uint32_t i = 0; i < DSK_PROBE_INSTRUCTIONS; ++i) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+
+        if (cpu.pc >= 0x3700U && cpu.pc < 0x4000U) {
+            entered_stage2 = true;
+        }
+        if (entered_stage2) {
+            if (cpu.pc < 0x0100U) {
+                break;
+            }
+            if (cpu.pc >= 0xFD00U && probe.disk2.nibble_pos[0] <= 384U) {
+                break;
+            }
+        }
+        apple2_machine_step_instruction(&probe);
+    }
+
+    {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+        int score = 0;
+
+        score += (int)disk_count_nonzero_range(&probe, 0x1D00U, 0x0400U);
+        score += (int)disk_count_nonzero_range(&probe, 0x2A00U, 0x0100U);
+        if (probe.disk2.nibble_pos[0] > 384U) {
+            score += 512;
+        }
+        if (probe.disk2.quarter_track[0] != 0U) {
+            score += 128;
+        }
+        if (cpu.pc >= 0x3000U && cpu.pc < 0x4000U) {
+            score += 128;
+        }
+        if (entered_stage2) {
+            score += 64;
+        }
+        if (cpu.pc < 0x0100U) {
+            score -= 512;
+        }
+        if (cpu.pc >= 0xFD00U) {
+            score -= 256;
+        }
+        return score;
+    }
+}
+
+static disk_image_type_t disk_probe_dsk_order(const uint8_t *rom,
+                                              size_t rom_size,
+                                              const uint8_t *slot6_rom,
+                                              size_t slot6_rom_size,
+                                              const uint8_t *disk,
+                                              size_t disk_size)
+{
+    const int dos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, false);
+    const int prodos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, true);
+
+    return (prodos_score > dos_score) ? DISK_IMAGE_DSK_PRODOS_ORDER : DISK_IMAGE_DSK_DOS_ORDER;
+}
 
 static bool disk_stage1_preload_complete(const apple2_machine_t *machine,
                                          const uint8_t *disk,
                                          disk_image_type_t image_type)
 {
-    static const uint8_t s_physical_track0_boot_sectors[10] = {
+    static const uint8_t s_boot_track_physical_sectors[10] = {
         0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
     };
 
@@ -25,8 +138,10 @@ static bool disk_stage1_preload_complete(const apple2_machine_t *machine,
         const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
         unsigned file_sector = sector;
 
-        if (image_type == DISK_IMAGE_PO_PHYSICAL_ORDER) {
-            file_sector = s_physical_track0_boot_sectors[sector];
+        if (image_type == DISK_IMAGE_PO_PRODOS_ORDER ||
+            image_type == DISK_IMAGE_DSK_PRODOS_ORDER) {
+            file_sector =
+                disk_find_file_sector_for_physical(s_prodos_track_order, s_boot_track_physical_sectors[sector]);
         }
 
         const uint8_t *expected = &disk[file_sector * 0x0100U];
@@ -76,13 +191,13 @@ int main(void)
         if (disk_file != NULL) {
             disk_size = fread(disk, 1, sizeof(disk), disk_file);
             fclose(disk_file);
-            disk_type = DISK_IMAGE_PO_PHYSICAL_ORDER;
+            disk_type = DISK_IMAGE_PO_PRODOS_ORDER;
         } else {
             disk_file = fopen("roms/dos_3.3.dsk", "rb");
             if (disk_file != NULL) {
                 disk_size = fread(disk, 1, sizeof(disk), disk_file);
                 fclose(disk_file);
-                disk_type = DISK_IMAGE_DSK_DOS_ORDER;
+                disk_type = DISK_IMAGE_DSK_PRODOS_ORDER;
             }
         }
     }
@@ -99,11 +214,16 @@ int main(void)
     if (disk_size != 0U) {
         bool loaded = false;
 
+        if (disk_type == DISK_IMAGE_DSK_PRODOS_ORDER) {
+            disk_type = disk_probe_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size);
+        }
+
         switch (disk_type) {
         case DISK_IMAGE_DO_DOS_ORDER:
             loaded = apple2_machine_load_drive0_do(&machine, disk, disk_size);
             break;
-        case DISK_IMAGE_PO_PHYSICAL_ORDER:
+        case DISK_IMAGE_PO_PRODOS_ORDER:
+        case DISK_IMAGE_DSK_PRODOS_ORDER:
             loaded = apple2_machine_load_drive0_po(&machine, disk, disk_size);
             break;
         case DISK_IMAGE_DSK_DOS_ORDER:

@@ -309,7 +309,7 @@ bool apple2_machine_load_drive0_po(apple2_machine_t *machine, const uint8_t *ima
                                               0,
                                               image,
                                               image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_PHYSICAL);
+                                              APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)

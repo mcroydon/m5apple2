@@ -1,4 +1,5 @@
 #include <inttypes.h>
+#include <limits.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -36,6 +37,105 @@ extern const uint8_t dos_3_3_po_end[] asm("_binary_dos_3_3_po_end");
 #ifdef M5APPLE2_HAS_DOS33_DSK
 extern const uint8_t dos_3_3_dsk_start[] asm("_binary_dos_3_3_dsk_start");
 extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
+#endif
+
+#define APP_DSK_PROBE_INSTRUCTIONS 750000U
+
+typedef enum {
+    APP_DISK_ORDER_DOS33 = 0,
+    APP_DISK_ORDER_PRODOS = 1,
+} app_disk_order_t;
+
+#if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
+static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
+{
+    unsigned nonzero = 0;
+
+    for (uint16_t i = 0; i < size; ++i) {
+        if (machine->memory[(uint16_t)(base + i)] != 0U) {
+            nonzero++;
+        }
+    }
+
+    return nonzero;
+}
+
+static int app_score_dsk_order(const uint8_t *image, size_t image_size, app_disk_order_t order)
+{
+    apple2_machine_t probe;
+    bool entered_stage2 = false;
+    bool loaded = false;
+
+    apple2_machine_init(&probe, &(apple2_config_t){ .cpu_hz = CONFIG_M5APPLE2_CPU_HZ });
+    if (!apple2_machine_load_system_rom(&probe,
+                                        apple2plus_rom_start,
+                                        (size_t)(apple2plus_rom_end - apple2plus_rom_start)) ||
+        !apple2_machine_load_slot6_rom(&probe,
+                                       disk2_rom_start,
+                                       (size_t)(disk2_rom_end - disk2_rom_start))) {
+        return INT_MIN / 2;
+    }
+
+    loaded = (order == APP_DISK_ORDER_PRODOS)
+                 ? apple2_machine_load_drive0_po(&probe, image, image_size)
+                 : apple2_machine_load_drive0_dsk(&probe, image, image_size);
+    if (!loaded) {
+        return INT_MIN / 2;
+    }
+
+    for (uint32_t i = 0; i < APP_DSK_PROBE_INSTRUCTIONS; ++i) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+
+        if (cpu.pc >= 0x3700U && cpu.pc < 0x4000U) {
+            entered_stage2 = true;
+        }
+        if (entered_stage2) {
+            if (cpu.pc < 0x0100U) {
+                break;
+            }
+            if (cpu.pc >= 0xFD00U && probe.disk2.nibble_pos[0] <= 384U) {
+                break;
+            }
+        }
+        apple2_machine_step_instruction(&probe);
+    }
+
+    {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+        int score = 0;
+
+        score += (int)app_count_nonzero_range(&probe, 0x1D00U, 0x0400U);
+        score += (int)app_count_nonzero_range(&probe, 0x2A00U, 0x0100U);
+        if (probe.disk2.nibble_pos[0] > 384U) {
+            score += 512;
+        }
+        if (probe.disk2.quarter_track[0] != 0U) {
+            score += 128;
+        }
+        if (cpu.pc >= 0x3000U && cpu.pc < 0x4000U) {
+            score += 128;
+        }
+        if (entered_stage2) {
+            score += 64;
+        }
+        if (cpu.pc < 0x0100U) {
+            score -= 512;
+        }
+        if (cpu.pc >= 0xFD00U) {
+            score -= 256;
+        }
+        return score;
+    }
+}
+
+static app_disk_order_t app_probe_dsk_order(const uint8_t *image, size_t image_size)
+{
+    const int dos_score = app_score_dsk_order(image, image_size, APP_DISK_ORDER_DOS33);
+    const int prodos_score = app_score_dsk_order(image, image_size, APP_DISK_ORDER_PRODOS);
+
+    ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d", dos_score, prodos_score);
+    return (prodos_score > dos_score) ? APP_DISK_ORDER_PRODOS : APP_DISK_ORDER_DOS33;
+}
 #endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
@@ -125,21 +225,39 @@ static bool app_load_drive0_image(void)
     {
         const size_t image_size = (size_t)(dos_3_3_po_end - dos_3_3_po_start);
         if (!apple2_machine_load_drive0_po(&s_machine, dos_3_3_po_start, image_size)) {
-            ESP_LOGE(TAG, "Embedded physical-order disk rejected, size=%u", (unsigned)image_size);
+            ESP_LOGE(TAG, "Embedded ProDOS-order disk rejected, size=%u", (unsigned)image_size);
             return false;
         }
-        ESP_LOGI(TAG, "Loaded embedded physical-order disk (%u bytes)", (unsigned)image_size);
+        ESP_LOGI(TAG, "Loaded embedded ProDOS-order disk (%u bytes)", (unsigned)image_size);
         return true;
     }
 #endif
 #ifdef M5APPLE2_HAS_DOS33_DSK
     {
         const size_t image_size = (size_t)(dos_3_3_dsk_end - dos_3_3_dsk_start);
-        if (!apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size)) {
+        bool loaded = false;
+
+#if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
+        const app_disk_order_t order = app_probe_dsk_order(dos_3_3_dsk_start, image_size);
+        loaded = (order == APP_DISK_ORDER_PRODOS)
+                     ? apple2_machine_load_drive0_po(&s_machine, dos_3_3_dsk_start, image_size)
+                     : apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size);
+        if (loaded) {
+            ESP_LOGI(TAG,
+                     "Loaded embedded .dsk disk (%u bytes, %s order)",
+                     (unsigned)image_size,
+                     (order == APP_DISK_ORDER_PRODOS) ? "ProDOS" : "DOS");
+        }
+#else
+        loaded = apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size);
+        if (loaded) {
+            ESP_LOGI(TAG, "Loaded embedded .dsk disk (%u bytes, DOS fallback)", (unsigned)image_size);
+        }
+#endif
+        if (!loaded) {
             ESP_LOGE(TAG, "Embedded .dsk disk rejected, size=%u", (unsigned)image_size);
             return false;
         }
-        ESP_LOGI(TAG, "Loaded embedded .dsk disk (%u bytes)", (unsigned)image_size);
         return true;
     }
 #else

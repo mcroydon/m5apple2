@@ -9,7 +9,7 @@
 
 typedef enum {
     APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL = 0,
-    APPLE2_DISK2_IMAGE_ORDER_PHYSICAL = 1,
+    APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL = 1,
 } apple2_disk2_image_order_t;
 
 typedef struct {

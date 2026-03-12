@@ -32,14 +32,17 @@ Usage:
   `roms/dos_3.3.po`,
   or `roms/dos_3.3.dsk`.
   The app prefers explicit `.do`, then `.po`, then `.dsk`.
+  Ambiguous `.dsk` images are probed at startup and loaded as DOS-order or
+  ProDOS-order based on which boot path looks more plausible.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
 Current limitations:
 
 - Disk II support is currently read-only and only exposes drive 1.
-- The Cardputer app now accepts explicit DOS-order `.do` and physical-order `.po`
-  images, and falls back to treating `.dsk` images as DOS-order.
+- The Cardputer app now accepts explicit DOS-order `.do` and ProDOS-order `.po`
+  images, and probes ambiguous `.dsk` images when the system and Disk II ROMs
+  are available.
 - DOS 3.3 boot now reaches the stage-2 entry page at `$3700`, but the later DOS
   initialization path still falls back to the monitor.
 - Built-in Cardputer keyboard matrix scanning is not implemented yet.

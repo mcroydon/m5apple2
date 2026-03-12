@@ -18,9 +18,14 @@ static const uint8_t s_disk2_gcr62[64] = {
     0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
 };
 
-static const uint8_t s_dsk_track_order[16] = {
+static const uint8_t s_dos33_track_order[16] = {
     0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1,
     0xE, 0xC, 0xA, 0x8, 0x6, 0x4, 0x2, 0xF,
+};
+
+static const uint8_t s_prodos_track_order[16] = {
+    0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
+    0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
 };
 
 static inline void disk2_encode44(uint8_t value, uint8_t *out_high, uint8_t *out_low)
@@ -123,6 +128,10 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
 {
     const uint8_t drive = disk2->active_drive;
     const uint8_t track = (uint8_t)(disk2->quarter_track[drive] / 4U);
+    const uint8_t *track_order =
+        (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)
+            ? s_dos33_track_order
+            : s_prodos_track_order;
     size_t pos = 0;
 
     if (drive >= 2U || !disk2->loaded[drive]) {
@@ -135,9 +144,8 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
     }
 
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
-        const uint8_t physical_sector = s_dsk_track_order[order_index];
-        const uint8_t file_sector =
-            (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL) ? order_index : physical_sector;
+        const uint8_t physical_sector = track_order[order_index];
+        const uint8_t file_sector = order_index;
         const size_t sector_offset =
             ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
         pos += disk2_append_sector(&disk2->track_cache[pos],
