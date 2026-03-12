@@ -113,6 +113,29 @@ static void test_text_render(void)
     assert(pixels[APPLE2_VIDEO_WIDTH * 3U + 3U] == APPLE2_COLOR_WHITE);
 }
 
+static void test_full_apple2plus_rom_layout(void)
+{
+    apple2_machine_t machine;
+    uint8_t rom[0x5000];
+
+    memset(rom, 0, sizeof(rom));
+    rom[0x1000] = 0x4C; /* C000 content should map for full images. */
+    rom[0x1600] = 0xA9; /* C600 content should map too. */
+    rom[0x4FFC] = 0x62; /* RESET -> $FA62 */
+    rom[0x4FFD] = 0xFA;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    assert(apple2_machine_load_system_rom(&machine, rom, sizeof(rom)));
+
+    assert(machine.system_rom_loaded);
+    assert(machine.slot6_rom_loaded);
+    assert(machine.memory[0xC000] == 0x4C);
+    assert(machine.memory[0xC600] == 0xA9);
+    assert(machine.memory[0xFFFC] == 0x62);
+    assert(machine.memory[0xFFFD] == 0xFA);
+    assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -120,6 +143,7 @@ int main(void)
     test_soft_switches();
     test_video_addresses();
     test_text_render();
+    test_full_apple2plus_rom_layout();
     puts("apple2 core tests passed");
     return 0;
 }

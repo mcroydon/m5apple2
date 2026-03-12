@@ -6,6 +6,8 @@
 
 #define APPLE2_ROM_BASE 0xD000U
 #define APPLE2_ROM_SIZE 0x3000U
+#define APPLE2_PLUS_ROM_BASE 0xB000U
+#define APPLE2_PLUS_ROM_SIZE 0x5000U
 #define APPLE2_SLOT6_ROM_BASE 0xC600U
 #define APPLE2_SLOT6_ROM_SIZE 0x0100U
 
@@ -136,14 +138,19 @@ void apple2_machine_reset(apple2_machine_t *machine)
 
 bool apple2_machine_load_system_rom(apple2_machine_t *machine, const uint8_t *rom, size_t rom_size)
 {
-    if (rom_size != APPLE2_ROM_SIZE && rom_size != 0x4000U) {
+    if (rom_size != APPLE2_ROM_SIZE && rom_size != 0x4000U && rom_size != APPLE2_PLUS_ROM_SIZE) {
         return false;
     }
 
     if (rom_size == APPLE2_ROM_SIZE) {
         memcpy(&machine->memory[APPLE2_ROM_BASE], rom, APPLE2_ROM_SIZE);
+        machine->slot6_rom_loaded = false;
+    } else if (rom_size == APPLE2_PLUS_ROM_SIZE) {
+        memcpy(&machine->memory[APPLE2_PLUS_ROM_BASE], rom, APPLE2_PLUS_ROM_SIZE);
+        machine->slot6_rom_loaded = true;
     } else {
         memcpy(&machine->memory[0xC000], rom, 0x4000U);
+        machine->slot6_rom_loaded = true;
     }
 
     machine->system_rom_loaded = true;

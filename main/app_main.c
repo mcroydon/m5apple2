@@ -18,8 +18,8 @@ static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 
 #ifdef M5APPLE2_HAS_APPLE2PLUS_ROM
-extern const uint8_t generated_assets_apple2plus_rom_start[] asm("_binary_generated_assets_apple2plus_rom_start");
-extern const uint8_t generated_assets_apple2plus_rom_end[] asm("_binary_generated_assets_apple2plus_rom_end");
+extern const uint8_t apple2plus_rom_start[] asm("_binary_apple2plus_rom_start");
+extern const uint8_t apple2plus_rom_end[] asm("_binary_apple2plus_rom_end");
 #endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
@@ -65,8 +65,8 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
 static bool app_load_system_rom(void)
 {
 #ifdef M5APPLE2_HAS_APPLE2PLUS_ROM
-    const size_t rom_size = (size_t)(generated_assets_apple2plus_rom_end - generated_assets_apple2plus_rom_start);
-    if (!apple2_machine_load_system_rom(&s_machine, generated_assets_apple2plus_rom_start, rom_size)) {
+    const size_t rom_size = (size_t)(apple2plus_rom_end - apple2plus_rom_start);
+    if (!apple2_machine_load_system_rom(&s_machine, apple2plus_rom_start, rom_size)) {
         ESP_LOGE(TAG, "Embedded ROM rejected, size=%u", (unsigned)rom_size);
         return false;
     }

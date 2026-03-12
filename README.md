@@ -20,11 +20,17 @@ Legal note:
 Usage:
 
 - Place an Apple II/II+ ROM image at `roms/apple2plus.rom`.
+  Accepted layouts:
+  `0x3000` bytes mapped at `D000-FFFF`,
+  `0x4000` bytes mapped at `C000-FFFF`,
+  or full Apple II Plus `0x5000` byte dumps mapped at `B000-FFFF`.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
 Current limitations:
 
+- The reset ROM now reaches the slot 6 boot path, but Disk II I/O and disk image
+  boot support are still incomplete.
 - Disk II controller and disk image boot support are not implemented yet.
 - Built-in Cardputer keyboard matrix scanning is not implemented yet.
 - The display pins and offsets are configurable in `menuconfig`, but the ADV

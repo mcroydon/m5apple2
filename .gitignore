@@ -5,5 +5,6 @@ sdkconfig.ci
 compile_commands.json
 .DS_Store
 tests/apple2_core_tests
+tests/apple2_rom_smoke
 main/generated_assets/
 roms/*.rom
