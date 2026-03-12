@@ -11,6 +11,7 @@ sh tests/run_rom_smoke.sh
 ```
 
 If `roms/disk2.rom` is present, the smoke test will load that slot-6 ROM too.
-If `roms/dos_3.3.dsk` is present, the smoke test also verifies that boot reaches
-the DOS stage-1 loader at `$0800`, maps the DOS-order track-0 boot pages into
-`$3600-$3FFF`, and reaches the DOS stage-2 entry page at `$3700`.
+If one of `roms/dos_3.3.do`, `roms/dos_3.3.po`, or `roms/dos_3.3.dsk` is present,
+the smoke test also verifies that boot reaches the DOS stage-1 loader at `$0800`,
+maps the corresponding track-0 boot pages into `$3600-$3FFF`, and reaches the
+DOS stage-2 entry page at `$3700`.

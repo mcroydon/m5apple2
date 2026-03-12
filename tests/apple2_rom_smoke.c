@@ -6,11 +6,30 @@
 #include <stdlib.h>
 #include <string.h>
 
-static bool disk_stage1_preload_complete(const apple2_machine_t *machine, const uint8_t *disk)
+typedef enum {
+    DISK_IMAGE_NONE = 0,
+    DISK_IMAGE_DSK_DOS_ORDER,
+    DISK_IMAGE_DO_DOS_ORDER,
+    DISK_IMAGE_PO_PHYSICAL_ORDER,
+} disk_image_type_t;
+
+static bool disk_stage1_preload_complete(const apple2_machine_t *machine,
+                                         const uint8_t *disk,
+                                         disk_image_type_t image_type)
 {
+    static const uint8_t s_physical_track0_boot_sectors[10] = {
+        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
+    };
+
     for (unsigned sector = 0; sector < 10U; ++sector) {
         const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
-        const uint8_t *expected = &disk[sector * 0x0100U];
+        unsigned file_sector = sector;
+
+        if (image_type == DISK_IMAGE_PO_PHYSICAL_ORDER) {
+            file_sector = s_physical_track0_boot_sectors[sector];
+        }
+
+        const uint8_t *expected = &disk[file_sector * 0x0100U];
         if (memcmp(&machine->memory[address], expected, 0x0100U) != 0) {
             return false;
         }
@@ -23,13 +42,14 @@ int main(void)
 {
     FILE *rom_file = fopen("roms/apple2plus.rom", "rb");
     FILE *slot6_file = fopen("roms/disk2.rom", "rb");
-    FILE *disk_file = fopen("roms/dos_3.3.dsk", "rb");
+    FILE *disk_file = fopen("roms/dos_3.3.do", "rb");
     uint8_t rom[0x8000];
     uint8_t slot6_rom[0x0100];
     uint8_t disk[APPLE2_DISK2_IMAGE_SIZE];
     size_t rom_size;
     size_t slot6_rom_size = 0;
     size_t disk_size = 0;
+    disk_image_type_t disk_type = DISK_IMAGE_NONE;
     apple2_machine_t machine;
     bool entered_slot6 = false;
     bool entered_boot1 = false;
@@ -50,6 +70,21 @@ int main(void)
     if (disk_file != NULL) {
         disk_size = fread(disk, 1, sizeof(disk), disk_file);
         fclose(disk_file);
+        disk_type = DISK_IMAGE_DO_DOS_ORDER;
+    } else {
+        disk_file = fopen("roms/dos_3.3.po", "rb");
+        if (disk_file != NULL) {
+            disk_size = fread(disk, 1, sizeof(disk), disk_file);
+            fclose(disk_file);
+            disk_type = DISK_IMAGE_PO_PHYSICAL_ORDER;
+        } else {
+            disk_file = fopen("roms/dos_3.3.dsk", "rb");
+            if (disk_file != NULL) {
+                disk_size = fread(disk, 1, sizeof(disk), disk_file);
+                fclose(disk_file);
+                disk_type = DISK_IMAGE_DSK_DOS_ORDER;
+            }
+        }
     }
 
     apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
@@ -61,9 +96,29 @@ int main(void)
         fprintf(stderr, "unsupported slot 6 ROM size: %zu\n", slot6_rom_size);
         return 4;
     }
-    if (disk_size != 0U && !apple2_machine_load_drive0_dsk(&machine, disk, disk_size)) {
-        fprintf(stderr, "unsupported disk image size: %zu\n", disk_size);
-        return 5;
+    if (disk_size != 0U) {
+        bool loaded = false;
+
+        switch (disk_type) {
+        case DISK_IMAGE_DO_DOS_ORDER:
+            loaded = apple2_machine_load_drive0_do(&machine, disk, disk_size);
+            break;
+        case DISK_IMAGE_PO_PHYSICAL_ORDER:
+            loaded = apple2_machine_load_drive0_po(&machine, disk, disk_size);
+            break;
+        case DISK_IMAGE_DSK_DOS_ORDER:
+            loaded = apple2_machine_load_drive0_dsk(&machine, disk, disk_size);
+            break;
+        case DISK_IMAGE_NONE:
+        default:
+            loaded = false;
+            break;
+        }
+
+        if (!loaded) {
+            fprintf(stderr, "unsupported disk image size: %zu\n", disk_size);
+            return 5;
+        }
     }
 
     for (uint32_t i = 0; i < 1500000U; ++i) {
@@ -77,7 +132,7 @@ int main(void)
         if (disk_size != 0U && cpu.pc >= 0x3700U && cpu.pc < 0x3800U) {
             entered_stage2 = true;
         }
-        if (disk_size != 0U && disk_stage1_preload_complete(&machine, disk)) {
+        if (disk_size != 0U && disk_stage1_preload_complete(&machine, disk, disk_type)) {
             stage1_preloaded = true;
         }
         if (disk_size != 0U && stage1_preloaded && entered_stage2) {
@@ -103,8 +158,8 @@ int main(void)
     if (disk_size != 0U && !stage1_preloaded) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         fprintf(stderr,
-                "Disk boot did not preload DOS-order track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
-                cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00]);
+                "Disk boot did not preload track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x type=%d\n",
+                cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00], (int)disk_type);
         return 7;
     }
     if (disk_size != 0U && !entered_stage2) {

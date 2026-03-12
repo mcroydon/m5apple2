@@ -25,6 +25,14 @@ extern const uint8_t apple2plus_rom_end[] asm("_binary_apple2plus_rom_end");
 extern const uint8_t disk2_rom_start[] asm("_binary_disk2_rom_start");
 extern const uint8_t disk2_rom_end[] asm("_binary_disk2_rom_end");
 #endif
+#ifdef M5APPLE2_HAS_DOS33_DO
+extern const uint8_t dos_3_3_do_start[] asm("_binary_dos_3_3_do_start");
+extern const uint8_t dos_3_3_do_end[] asm("_binary_dos_3_3_do_end");
+#endif
+#ifdef M5APPLE2_HAS_DOS33_PO
+extern const uint8_t dos_3_3_po_start[] asm("_binary_dos_3_3_po_start");
+extern const uint8_t dos_3_3_po_end[] asm("_binary_dos_3_3_po_end");
+#endif
 #ifdef M5APPLE2_HAS_DOS33_DSK
 extern const uint8_t dos_3_3_dsk_start[] asm("_binary_dos_3_3_dsk_start");
 extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
@@ -100,16 +108,40 @@ static bool app_load_slot6_rom(void)
 #endif
 }
 
-static bool app_load_drive0_dsk(void)
+static bool app_load_drive0_image(void)
 {
-#ifdef M5APPLE2_HAS_DOS33_DSK
-    const size_t image_size = (size_t)(dos_3_3_dsk_end - dos_3_3_dsk_start);
-    if (!apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size)) {
-        ESP_LOGE(TAG, "Embedded DOS 3.3 disk rejected, size=%u", (unsigned)image_size);
-        return false;
+#ifdef M5APPLE2_HAS_DOS33_DO
+    {
+        const size_t image_size = (size_t)(dos_3_3_do_end - dos_3_3_do_start);
+        if (!apple2_machine_load_drive0_do(&s_machine, dos_3_3_do_start, image_size)) {
+            ESP_LOGE(TAG, "Embedded DOS-order disk rejected, size=%u", (unsigned)image_size);
+            return false;
+        }
+        ESP_LOGI(TAG, "Loaded embedded DOS-order disk (%u bytes)", (unsigned)image_size);
+        return true;
     }
-    ESP_LOGI(TAG, "Loaded embedded DOS 3.3 disk (%u bytes)", (unsigned)image_size);
-    return true;
+#endif
+#ifdef M5APPLE2_HAS_DOS33_PO
+    {
+        const size_t image_size = (size_t)(dos_3_3_po_end - dos_3_3_po_start);
+        if (!apple2_machine_load_drive0_po(&s_machine, dos_3_3_po_start, image_size)) {
+            ESP_LOGE(TAG, "Embedded physical-order disk rejected, size=%u", (unsigned)image_size);
+            return false;
+        }
+        ESP_LOGI(TAG, "Loaded embedded physical-order disk (%u bytes)", (unsigned)image_size);
+        return true;
+    }
+#endif
+#ifdef M5APPLE2_HAS_DOS33_DSK
+    {
+        const size_t image_size = (size_t)(dos_3_3_dsk_end - dos_3_3_dsk_start);
+        if (!apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size)) {
+            ESP_LOGE(TAG, "Embedded .dsk disk rejected, size=%u", (unsigned)image_size);
+            return false;
+        }
+        ESP_LOGI(TAG, "Loaded embedded .dsk disk (%u bytes)", (unsigned)image_size);
+        return true;
+    }
 #else
     return false;
 #endif
@@ -135,7 +167,7 @@ void app_main(void)
 
     rom_loaded = app_load_system_rom();
     slot6_loaded = app_load_slot6_rom();
-    drive0_loaded = app_load_drive0_dsk();
+    drive0_loaded = app_load_drive0_image();
     if (rom_loaded && !slot6_loaded) {
         ESP_LOGW(TAG, "System ROM loaded without a separate Disk II ROM");
     }

@@ -10,7 +10,7 @@ Current scope:
 - ST7789 LCD front end for Cardputer-class ESP32-S3 hardware via `esp_lcd`
 - USB/UART console input path for development on-device
 - Optional embedded ROM loading from `roms/apple2plus.rom`
-- Read-only Disk II slot-6 boot support for 140 KB DOS-order `.dsk` images
+- Read-only Disk II slot-6 boot support for 140 KB `.do`, `.po`, or `.dsk` images
 - Host-side regression tests for CPU, video mapping, soft switches, and disk boot smoke
 
 Legal note:
@@ -27,17 +27,19 @@ Usage:
   or full Apple II Plus `0x5000` byte dumps mapped at `B000-FFFF`.
 - Optionally place a Disk II controller ROM at `roms/disk2.rom`.
   If present, it is embedded and mapped into slot 6 at `C600-C6FF`.
-- Optionally place a bootable 140 KB DOS-order `.dsk` image at `roms/dos_3.3.dsk`.
-  If present, it is embedded and mounted as read-only drive 1.
+- Optionally place a bootable 140 KB disk image at one of:
+  `roms/dos_3.3.do`,
+  `roms/dos_3.3.po`,
+  or `roms/dos_3.3.dsk`.
+  The app prefers explicit `.do`, then `.po`, then `.dsk`.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
 Current limitations:
 
 - Disk II support is currently read-only and only exposes drive 1.
-- The Cardputer app currently treats `.dsk` images as 16-sector DOS-order disks.
-- The core also exposes explicit DOS-order `.do` and physical-order `.po` loaders
-  for host-side or future front-end use.
+- The Cardputer app now accepts explicit DOS-order `.do` and physical-order `.po`
+  images, and falls back to treating `.dsk` images as DOS-order.
 - DOS 3.3 boot now reaches the stage-2 entry page at `$3700`, but the later DOS
   initialization path still falls back to the monitor.
 - Built-in Cardputer keyboard matrix scanning is not implemented yet.
