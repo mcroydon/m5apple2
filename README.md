@@ -36,6 +36,8 @@ Current limitations:
 
 - Disk II support is currently read-only and only exposes drive 1.
 - Only 16-sector 140 KB DOS-order `.dsk` images are supported right now.
+- DOS 3.3 boot currently reaches the boot sector and the track-0 preload stage, but
+  the later DOS initialization path still falls back to the monitor.
 - Built-in Cardputer keyboard matrix scanning is not implemented yet.
 - The display pins and offsets are configurable in `menuconfig`, but the ADV
   profile still needs hardware validation.

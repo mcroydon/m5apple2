@@ -4,6 +4,20 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
+
+static bool disk_stage1_preload_complete(const apple2_machine_t *machine, const uint8_t *disk)
+{
+    for (unsigned sector = 0; sector < 10U; ++sector) {
+        const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
+        const uint8_t *expected = &disk[sector * 0x0100U];
+        if (memcmp(&machine->memory[address], expected, 0x0100U) != 0) {
+            return false;
+        }
+    }
+
+    return true;
+}
 
 int main(void)
 {
@@ -19,6 +33,7 @@ int main(void)
     apple2_machine_t machine;
     bool entered_slot6 = false;
     bool entered_boot1 = false;
+    bool stage1_preloaded = false;
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -50,13 +65,16 @@ int main(void)
         return 5;
     }
 
-    for (uint32_t i = 0; i < 1000000U; ++i) {
+    for (uint32_t i = 0; i < 1500000U; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         if (cpu.pc >= 0xC600U && cpu.pc < 0xC700U) {
             entered_slot6 = true;
         }
         if (disk_size != 0U && cpu.pc >= 0x0800U && cpu.pc < 0x0C00U) {
             entered_boot1 = true;
+        }
+        if (disk_size != 0U && disk_stage1_preload_complete(&machine, disk)) {
+            stage1_preloaded = true;
             break;
         }
         if (disk_size == 0U && entered_slot6) {
@@ -76,7 +94,14 @@ int main(void)
                 cpu.pc, machine.memory[0x0800], machine.memory[0x0801]);
         return 6;
     }
+    if (disk_size != 0U && !stage1_preloaded) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        fprintf(stderr,
+                "Disk boot did not preload track 0 DOS sectors, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
+                cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00]);
+        return 7;
+    }
 
-    puts(disk_size != 0U ? "apple2 ROM+disk smoke passed" : "apple2 ROM smoke passed");
+    puts(disk_size != 0U ? "apple2 ROM+disk stage1 smoke passed" : "apple2 ROM smoke passed");
     return 0;
 }

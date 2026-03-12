@@ -18,7 +18,7 @@ static const uint8_t s_disk2_gcr62[64] = {
     0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
 };
 
-static const uint8_t s_dos33_phys_to_log[16] = {
+static const uint8_t s_dos33_log_to_phys[16] = {
     0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1,
     0xE, 0xC, 0xA, 0x8, 0x6, 0x4, 0x2, 0xF,
 };
@@ -42,11 +42,27 @@ static size_t disk2_append_sector(uint8_t *out, uint8_t volume, uint8_t track, u
     memset(aux, 0, sizeof(aux));
     for (uint16_t i = 0; i < 256U; ++i) {
         upper[i] = (uint8_t)(data[i] >> 2);
-        aux[i % 86U] = (uint8_t)((aux[i % 86U] << 2) | (data[i] & 0x03U));
     }
-    aux[84] = (uint8_t)(aux[84] << 2);
-    aux[85] = (uint8_t)(aux[85] << 2);
+    /* DOS 3.3 6-and-2 packs the swapped low two bits for bytes i, i+86, i+172
+       into the low, middle, and high pairs of a descending 86-byte aux table. */
+    for (uint16_t i = 0; i < 86U; ++i) {
+        const uint16_t aux_index = 85U - i;
 
+        {
+            const uint8_t low2 = (uint8_t)(((data[i] & 0x01U) << 1) | ((data[i] & 0x02U) >> 1));
+            aux[aux_index] |= low2;
+        }
+        if ((i + 86U) < 256U) {
+            const uint8_t low2 = (uint8_t)(((data[i + 86U] & 0x01U) << 1) |
+                                           ((data[i + 86U] & 0x02U) >> 1));
+            aux[aux_index] |= (uint8_t)(low2 << 2);
+        }
+        if ((i + 172U) < 256U) {
+            const uint8_t low2 = (uint8_t)(((data[i + 172U] & 0x01U) << 1) |
+                                           ((data[i + 172U] & 0x02U) >> 1));
+            aux[aux_index] |= (uint8_t)(low2 << 4);
+        }
+    }
     for (uint8_t i = 0; i < 16U; ++i) {
         out[pos++] = 0xFFU;
     }
@@ -118,8 +134,8 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
         return true;
     }
 
-    for (uint8_t physical_sector = 0; physical_sector < APPLE2_DISK2_SECTORS; ++physical_sector) {
-        const uint8_t logical_sector = s_dos33_phys_to_log[physical_sector];
+    for (uint8_t logical_sector = 0; logical_sector < APPLE2_DISK2_SECTORS; ++logical_sector) {
+        const uint8_t physical_sector = s_dos33_log_to_phys[logical_sector];
         const size_t sector_offset =
             ((size_t)track * APPLE2_DISK2_SECTORS + logical_sector) * APPLE2_DISK2_SECTOR_SIZE;
         pos += disk2_append_sector(&disk2->track_cache[pos],
