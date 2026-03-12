@@ -45,6 +45,8 @@ Current limitations:
   are available.
 - DOS 3.3 now reaches the `]` prompt on the explicit ProDOS-order `.po` path
   and on ambiguous `.dsk` images that probe to that same layout.
+- The host-side ROM smoke also verifies prompt-side Apple II keyboard input by
+  typing `PRINT 1<RETURN>` through the emulated key latch.
 - Built-in Cardputer keyboard matrix scanning is still not implemented, so the
   DOS prompt is only usable through the console input fallback today.
 - The display pins and offsets are configurable in `menuconfig`, but the ADV

@@ -216,6 +216,7 @@ int main(void)
     bool entered_stage2 = false;
     bool advanced_loader = false;
     bool dos_prompt_ready = false;
+    bool dos_command_echoed = false;
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -386,7 +387,34 @@ int main(void)
                 machine.memory[apple2_text_row_address(false, 5U)]);
         return 10;
     }
+    if (disk_size != 0U &&
+        (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER)) {
+        static const char s_test_command[] = "PRINT 1\r";
+        size_t command_pos = 0;
 
-    puts(disk_size != 0U ? "apple2 ROM+disk prompt smoke passed" : "apple2 ROM smoke passed");
+        for (uint32_t i = 0; i < 200000U; ++i) {
+            if (command_pos < (sizeof(s_test_command) - 1U) && (machine.key_latch & 0x80U) == 0U) {
+                apple2_machine_set_key(&machine, (uint8_t)s_test_command[command_pos++]);
+            }
+            if (command_pos == (sizeof(s_test_command) - 1U) &&
+                disk_screen_contains(&machine, "]PRINT 1")) {
+                dos_command_echoed = true;
+                break;
+            }
+            apple2_machine_step_instruction(&machine);
+        }
+
+        if (!dos_command_echoed) {
+            const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+            fprintf(stderr,
+                    "DOS prompt did not echo keyboard input, pc=%04x key=%02x row5=%02x row6=%02x\n",
+                    cpu.pc, machine.key_latch,
+                    machine.memory[apple2_text_row_address(false, 5U)],
+                    machine.memory[apple2_text_row_address(false, 6U)]);
+            return 11;
+        }
+    }
+
+    puts(disk_size != 0U ? "apple2 ROM+disk prompt/input smoke passed" : "apple2 ROM smoke passed");
     return 0;
 }
