@@ -161,6 +161,19 @@ static void test_separate_slot6_rom_layout(void)
     assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
 }
 
+static void test_drive0_dsk_loading(void)
+{
+    apple2_machine_t machine;
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+
+    memset(image, 0xA5, sizeof(image));
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    assert(apple2_machine_load_drive0_dsk(&machine, image, sizeof(image)));
+    assert(apple2_disk2_drive_loaded(&machine.disk2, 0));
+    assert(!apple2_machine_load_drive0_dsk(&machine, image, sizeof(image) - 1U));
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -170,6 +183,7 @@ int main(void)
     test_text_render();
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
+    test_drive0_dsk_loading();
     puts("apple2 core tests passed");
     return 0;
 }

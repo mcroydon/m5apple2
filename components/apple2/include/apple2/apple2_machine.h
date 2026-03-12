@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "apple2/apple2_disk2.h"
 #include "apple2/apple2_video.h"
 #include "apple2/cpu6502.h"
 
@@ -32,6 +33,7 @@ typedef struct {
     uint8_t key_latch;
     uint32_t speaker_toggles;
     apple2_video_state_t video;
+    apple2_disk2_t disk2;
     bool system_rom_loaded;
     bool slot6_rom_loaded;
 } apple2_machine_t;
@@ -40,6 +42,7 @@ void apple2_machine_init(apple2_machine_t *machine, const apple2_config_t *confi
 void apple2_machine_reset(apple2_machine_t *machine);
 bool apple2_machine_load_system_rom(apple2_machine_t *machine, const uint8_t *rom, size_t rom_size);
 bool apple2_machine_load_slot6_rom(apple2_machine_t *machine, const uint8_t *rom, size_t rom_size);
+bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii);
 void apple2_machine_step(apple2_machine_t *machine, uint32_t cycles);
 uint32_t apple2_machine_step_instruction(apple2_machine_t *machine);

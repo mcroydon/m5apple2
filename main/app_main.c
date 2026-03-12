@@ -25,6 +25,10 @@ extern const uint8_t apple2plus_rom_end[] asm("_binary_apple2plus_rom_end");
 extern const uint8_t disk2_rom_start[] asm("_binary_disk2_rom_start");
 extern const uint8_t disk2_rom_end[] asm("_binary_disk2_rom_end");
 #endif
+#ifdef M5APPLE2_HAS_DOS33_DSK
+extern const uint8_t dos_3_3_dsk_start[] asm("_binary_dos_3_3_dsk_start");
+extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
+#endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
 {
@@ -96,6 +100,21 @@ static bool app_load_slot6_rom(void)
 #endif
 }
 
+static bool app_load_drive0_dsk(void)
+{
+#ifdef M5APPLE2_HAS_DOS33_DSK
+    const size_t image_size = (size_t)(dos_3_3_dsk_end - dos_3_3_dsk_start);
+    if (!apple2_machine_load_drive0_dsk(&s_machine, dos_3_3_dsk_start, image_size)) {
+        ESP_LOGE(TAG, "Embedded DOS 3.3 disk rejected, size=%u", (unsigned)image_size);
+        return false;
+    }
+    ESP_LOGI(TAG, "Loaded embedded DOS 3.3 disk (%u bytes)", (unsigned)image_size);
+    return true;
+#else
+    return false;
+#endif
+}
+
 void app_main(void)
 {
     apple2_config_t apple2_config = {
@@ -103,6 +122,7 @@ void app_main(void)
     };
     bool rom_loaded = false;
     bool slot6_loaded = false;
+    bool drive0_loaded = false;
     int64_t last_cpu_tick_us;
     int64_t last_frame_tick_us;
 
@@ -115,8 +135,15 @@ void app_main(void)
 
     rom_loaded = app_load_system_rom();
     slot6_loaded = app_load_slot6_rom();
+    drive0_loaded = app_load_drive0_dsk();
     if (rom_loaded && !slot6_loaded) {
         ESP_LOGW(TAG, "System ROM loaded without a separate Disk II ROM");
+    }
+    if (drive0_loaded && !rom_loaded) {
+        ESP_LOGW(TAG, "Disk image loaded without a system ROM");
+    }
+    if (drive0_loaded && !slot6_loaded && !s_machine.slot6_rom_loaded) {
+        ESP_LOGW(TAG, "Disk image loaded without Disk II ROM support");
     }
     if (!rom_loaded) {
         app_show_status_screen("PLACE APPLE2PLUS.ROM IN", "roms/ AND REBUILD.", "RUNS WITHOUT ROM SHOW STATUS.");

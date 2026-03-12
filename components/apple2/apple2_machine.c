@@ -52,6 +52,10 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
         break;
     }
 
+    if (address >= 0xC0E0U && address <= 0xC0EFU) {
+        return apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU));
+    }
+
     if ((address >= 0xC100U && address < APPLE2_SLOT6_ROM_BASE) ||
         (address >= 0xC700U && address < APPLE2_ROM_BASE)) {
         return 0x00;
@@ -99,6 +103,11 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
         break;
     }
 
+    if (address >= 0xC0E0U && address <= 0xC0EFU) {
+        (void)apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU));
+        return;
+    }
+
     if (address >= APPLE2_ROM_BASE) {
         return;
     }
@@ -119,6 +128,7 @@ void apple2_machine_init(apple2_machine_t *machine, const apple2_config_t *confi
     memset(machine, 0, sizeof(*machine));
     machine->config = *config;
     machine->video.text_mode = true;
+    apple2_disk2_init(&machine->disk2);
     cpu6502_init(&machine->cpu, &bus);
     apple2_machine_reset(machine);
 }
@@ -132,6 +142,7 @@ void apple2_machine_reset(apple2_machine_t *machine)
     machine->video.page2 = false;
     machine->video.hires_mode = false;
     machine->video.flash_state = false;
+    apple2_disk2_reset(&machine->disk2);
     cpu6502_reset(&machine->cpu);
     machine->total_cycles = machine->cpu.total_cycles;
 }
@@ -168,6 +179,11 @@ bool apple2_machine_load_slot6_rom(apple2_machine_t *machine, const uint8_t *rom
     memcpy(&machine->memory[APPLE2_SLOT6_ROM_BASE], rom, APPLE2_SLOT6_ROM_SIZE);
     machine->slot6_rom_loaded = true;
     return true;
+}
+
+bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_drive(&machine->disk2, 0, image, image_size);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
@@ -235,9 +251,10 @@ const char *apple2_machine_status(const apple2_machine_t *machine)
     static char buffer[128];
 
     snprintf(buffer, sizeof(buffer),
-             "ROM:%s slot6:%s PC=%04x A=%02x X=%02x Y=%02x P=%02x cycles=%" PRIu64,
+             "ROM:%s slot6:%s d0:%s PC=%04x A=%02x X=%02x Y=%02x P=%02x cycles=%" PRIu64,
              machine->system_rom_loaded ? "yes" : "no",
              machine->slot6_rom_loaded ? "yes" : "no",
+             apple2_disk2_drive_loaded(&machine->disk2, 0) ? "yes" : "no",
              machine->cpu.pc, machine->cpu.a, machine->cpu.x, machine->cpu.y,
              machine->cpu.p, machine->total_cycles);
     return buffer;
