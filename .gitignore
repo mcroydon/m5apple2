@@ -5,3 +5,4 @@ sdkconfig.ci
 compile_commands.json
 .DS_Store
 tests/apple2_core_tests
+main/generated_assets/

@@ -1,5 +1,19 @@
 idf_component_register(
     SRCS "app_main.c"
-    REQUIRES apple2 cardputer
+    REQUIRES apple2 cardputer esp_timer
 )
 
+set(M5APPLE2_GENERATED_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated_assets")
+file(MAKE_DIRECTORY "${M5APPLE2_GENERATED_ASSET_DIR}")
+
+set(M5APPLE2_SYSTEM_ROM_SOURCE "${PROJECT_DIR}/roms/apple2plus.rom")
+set(M5APPLE2_SYSTEM_ROM_EMBED "generated_assets/apple2plus.rom")
+set(M5APPLE2_SYSTEM_ROM_EMBED_ABS "${M5APPLE2_GENERATED_ASSET_DIR}/apple2plus.rom")
+
+if(EXISTS "${M5APPLE2_SYSTEM_ROM_SOURCE}")
+    file(COPY_FILE "${M5APPLE2_SYSTEM_ROM_SOURCE}" "${M5APPLE2_SYSTEM_ROM_EMBED_ABS}" ONLY_IF_DIFFERENT)
+    target_add_binary_data(${COMPONENT_LIB} "${M5APPLE2_SYSTEM_ROM_EMBED}" BINARY)
+    target_compile_definitions(${COMPONENT_LIB} PRIVATE M5APPLE2_HAS_APPLE2PLUS_ROM=1)
+else()
+    file(REMOVE "${M5APPLE2_SYSTEM_ROM_EMBED_ABS}")
+endif()

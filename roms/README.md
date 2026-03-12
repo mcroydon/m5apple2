@@ -1,8 +1,11 @@
 # ROM files
 
-User-supplied Apple II ROM images should live here during development.
+Put user-supplied Apple II ROM images here before building.
 
-Planned files:
+Supported today:
 
-- `apple2plus.rom` for the system ROM
-- `disk2.rom` for the optional Disk II controller ROM
+- `apple2plus.rom`: embedded automatically into the firmware at build time
+
+Planned later:
+
+- `disk2.rom`: for Disk II boot support when the controller emulation lands

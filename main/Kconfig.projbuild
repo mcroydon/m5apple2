@@ -50,6 +50,14 @@ config M5APPLE2_LCD_PIN_BKLT
     int "LCD backlight pin"
     default 38
 
+config M5APPLE2_LCD_OFFSET_X
+    int "LCD X offset"
+    default 40
+
+config M5APPLE2_LCD_OFFSET_Y
+    int "LCD Y offset"
+    default 53
+
 config M5APPLE2_LCD_SWAP_XY
     bool "Swap LCD axes"
     default y
@@ -62,6 +70,10 @@ config M5APPLE2_LCD_MIRROR_Y
     bool "Mirror LCD Y"
     default y
 
+config M5APPLE2_LCD_PRESERVE_ASPECT
+    bool "Preserve Apple II aspect ratio"
+    default y
+
 config M5APPLE2_INPUT_USE_UART
     bool "Enable USB/UART console input fallback"
     default y
@@ -71,4 +83,3 @@ config M5APPLE2_CPU_HZ
     default 1020484
 
 endmenu
-
