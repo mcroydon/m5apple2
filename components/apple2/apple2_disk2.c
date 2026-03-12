@@ -18,7 +18,7 @@ static const uint8_t s_disk2_gcr62[64] = {
     0xF7, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF,
 };
 
-static const uint8_t s_dos33_log_to_phys[16] = {
+static const uint8_t s_dsk_track_order[16] = {
     0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1,
     0xE, 0xC, 0xA, 0x8, 0x6, 0x4, 0x2, 0xF,
 };
@@ -134,10 +134,12 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
         return true;
     }
 
-    for (uint8_t logical_sector = 0; logical_sector < APPLE2_DISK2_SECTORS; ++logical_sector) {
-        const uint8_t physical_sector = s_dos33_log_to_phys[logical_sector];
+    for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
+        const uint8_t physical_sector = s_dsk_track_order[order_index];
+        const uint8_t file_sector =
+            (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DO_LOGICAL) ? order_index : physical_sector;
         const size_t sector_offset =
-            ((size_t)track * APPLE2_DISK2_SECTORS + logical_sector) * APPLE2_DISK2_SECTOR_SIZE;
+            ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
         pos += disk2_append_sector(&disk2->track_cache[pos],
                                    0xFEU,
                                    track,
@@ -216,12 +218,26 @@ void apple2_disk2_reset(apple2_disk2_t *disk2)
 
 bool apple2_disk2_load_drive(apple2_disk2_t *disk2, unsigned drive_index, const uint8_t *image, size_t image_size)
 {
+    return apple2_disk2_load_drive_with_order(disk2,
+                                              drive_index,
+                                              image,
+                                              image_size,
+                                              APPLE2_DISK2_IMAGE_ORDER_DSK_PHYSICAL);
+}
+
+bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
+                                        unsigned drive_index,
+                                        const uint8_t *image,
+                                        size_t image_size,
+                                        apple2_disk2_image_order_t image_order)
+{
     if (drive_index >= 2U || image_size != APPLE2_DISK2_IMAGE_SIZE) {
         return false;
     }
 
     disk2->image[drive_index] = image;
     disk2->image_size[drive_index] = image_size;
+    disk2->image_order[drive_index] = image_order;
     disk2->loaded[drive_index] = true;
     disk2->track_cache_valid = false;
     return true;

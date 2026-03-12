@@ -8,9 +8,13 @@
 
 static bool disk_stage1_preload_complete(const apple2_machine_t *machine, const uint8_t *disk)
 {
+    static const uint8_t s_track0_boot_sectors[10] = {
+        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
+    };
+
     for (unsigned sector = 0; sector < 10U; ++sector) {
         const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
-        const uint8_t *expected = &disk[sector * 0x0100U];
+        const uint8_t *expected = &disk[s_track0_boot_sectors[sector] * 0x0100U];
         if (memcmp(&machine->memory[address], expected, 0x0100U) != 0) {
             return false;
         }
@@ -34,6 +38,7 @@ int main(void)
     bool entered_slot6 = false;
     bool entered_boot1 = false;
     bool stage1_preloaded = false;
+    bool entered_stage2 = false;
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -73,8 +78,13 @@ int main(void)
         if (disk_size != 0U && cpu.pc >= 0x0800U && cpu.pc < 0x0C00U) {
             entered_boot1 = true;
         }
+        if (disk_size != 0U && cpu.pc >= 0x3700U && cpu.pc < 0x3800U) {
+            entered_stage2 = true;
+        }
         if (disk_size != 0U && disk_stage1_preload_complete(&machine, disk)) {
             stage1_preloaded = true;
+        }
+        if (disk_size != 0U && stage1_preloaded && entered_stage2) {
             break;
         }
         if (disk_size == 0U && entered_slot6) {
@@ -97,11 +107,18 @@ int main(void)
     if (disk_size != 0U && !stage1_preloaded) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         fprintf(stderr,
-                "Disk boot did not preload track 0 DOS sectors, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
+                "Disk boot did not preload physical-order track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
                 cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00]);
         return 7;
     }
+    if (disk_size != 0U && !entered_stage2) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        fprintf(stderr,
+                "Disk boot did not reach the DOS stage2 entry page, pc=%04x p3700=%02x p3701=%02x p3702=%02x\n",
+                cpu.pc, machine.memory[0x3700], machine.memory[0x3701], machine.memory[0x3702]);
+        return 8;
+    }
 
-    puts(disk_size != 0U ? "apple2 ROM+disk stage1 smoke passed" : "apple2 ROM smoke passed");
+    puts(disk_size != 0U ? "apple2 ROM+disk stage2 smoke passed" : "apple2 ROM smoke passed");
     return 0;
 }

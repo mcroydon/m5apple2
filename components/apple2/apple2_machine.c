@@ -183,7 +183,20 @@ bool apple2_machine_load_slot6_rom(apple2_machine_t *machine, const uint8_t *rom
 
 bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
-    return apple2_disk2_load_drive(&machine->disk2, 0, image, image_size);
+    return apple2_disk2_load_drive_with_order(&machine->disk2,
+                                              0,
+                                              image,
+                                              image_size,
+                                              APPLE2_DISK2_IMAGE_ORDER_DSK_PHYSICAL);
+}
+
+bool apple2_machine_load_drive0_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_drive_with_order(&machine->disk2,
+                                              0,
+                                              image,
+                                              image_size,
+                                              APPLE2_DISK2_IMAGE_ORDER_DO_LOGICAL);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
