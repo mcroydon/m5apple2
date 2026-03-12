@@ -8,13 +8,9 @@
 
 static bool disk_stage1_preload_complete(const apple2_machine_t *machine, const uint8_t *disk)
 {
-    static const uint8_t s_track0_boot_sectors[10] = {
-        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
-    };
-
     for (unsigned sector = 0; sector < 10U; ++sector) {
         const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
-        const uint8_t *expected = &disk[s_track0_boot_sectors[sector] * 0x0100U];
+        const uint8_t *expected = &disk[sector * 0x0100U];
         if (memcmp(&machine->memory[address], expected, 0x0100U) != 0) {
             return false;
         }
@@ -107,7 +103,7 @@ int main(void)
     if (disk_size != 0U && !stage1_preloaded) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         fprintf(stderr,
-                "Disk boot did not preload physical-order track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
+                "Disk boot did not preload DOS-order track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x\n",
                 cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00]);
         return 7;
     }

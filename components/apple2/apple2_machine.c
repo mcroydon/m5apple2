@@ -187,7 +187,7 @@ bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *im
                                               0,
                                               image,
                                               image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_DSK_PHYSICAL);
+                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
 }
 
 bool apple2_machine_load_drive0_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
@@ -196,7 +196,16 @@ bool apple2_machine_load_drive0_do(apple2_machine_t *machine, const uint8_t *ima
                                               0,
                                               image,
                                               image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_DO_LOGICAL);
+                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+}
+
+bool apple2_machine_load_drive0_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_drive_with_order(&machine->disk2,
+                                              0,
+                                              image,
+                                              image_size,
+                                              APPLE2_DISK2_IMAGE_ORDER_PHYSICAL);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)

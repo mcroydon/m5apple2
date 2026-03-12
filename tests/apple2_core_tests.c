@@ -171,9 +171,11 @@ static void test_drive0_dsk_loading(void)
 
     assert(apple2_machine_load_drive0_dsk(&machine, image, sizeof(image)));
     assert(apple2_disk2_drive_loaded(&machine.disk2, 0));
-    assert(machine.disk2.image_order[0] == APPLE2_DISK2_IMAGE_ORDER_DSK_PHYSICAL);
+    assert(machine.disk2.image_order[0] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
     assert(apple2_machine_load_drive0_do(&machine, image, sizeof(image)));
-    assert(machine.disk2.image_order[0] == APPLE2_DISK2_IMAGE_ORDER_DO_LOGICAL);
+    assert(machine.disk2.image_order[0] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+    assert(apple2_machine_load_drive0_po(&machine, image, sizeof(image)));
+    assert(machine.disk2.image_order[0] == APPLE2_DISK2_IMAGE_ORDER_PHYSICAL);
     assert(!apple2_machine_load_drive0_dsk(&machine, image, sizeof(image) - 1U));
 }
 

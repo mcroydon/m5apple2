@@ -137,7 +137,7 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
         const uint8_t physical_sector = s_dsk_track_order[order_index];
         const uint8_t file_sector =
-            (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DO_LOGICAL) ? order_index : physical_sector;
+            (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL) ? order_index : physical_sector;
         const size_t sector_offset =
             ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
         pos += disk2_append_sector(&disk2->track_cache[pos],
@@ -222,7 +222,7 @@ bool apple2_disk2_load_drive(apple2_disk2_t *disk2, unsigned drive_index, const 
                                               drive_index,
                                               image,
                                               image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_DSK_PHYSICAL);
+                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
 }
 
 bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
