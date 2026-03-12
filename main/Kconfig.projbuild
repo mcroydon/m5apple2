@@ -1,0 +1,74 @@
+menu "m5apple2"
+
+choice M5APPLE2_CARDPUTER_VARIANT
+    prompt "Cardputer variant"
+    default M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    help
+        Select the Cardputer hardware profile to build for.
+
+config M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    bool "Original Cardputer"
+
+config M5APPLE2_CARDPUTER_VARIANT_ADV
+    bool "Cardputer ADV"
+
+endchoice
+
+config M5APPLE2_LCD_HOST_ID
+    int "LCD SPI host"
+    default 2
+
+config M5APPLE2_LCD_WIDTH
+    int "LCD width"
+    default 240
+
+config M5APPLE2_LCD_HEIGHT
+    int "LCD height"
+    default 135
+
+config M5APPLE2_LCD_PIN_MOSI
+    int "LCD MOSI pin"
+    default 35
+
+config M5APPLE2_LCD_PIN_CLK
+    int "LCD clock pin"
+    default 36
+
+config M5APPLE2_LCD_PIN_CS
+    int "LCD CS pin"
+    default 33
+
+config M5APPLE2_LCD_PIN_DC
+    int "LCD D/C pin"
+    default 34
+
+config M5APPLE2_LCD_PIN_RST
+    int "LCD reset pin"
+    default 37
+
+config M5APPLE2_LCD_PIN_BKLT
+    int "LCD backlight pin"
+    default 38
+
+config M5APPLE2_LCD_SWAP_XY
+    bool "Swap LCD axes"
+    default y
+
+config M5APPLE2_LCD_MIRROR_X
+    bool "Mirror LCD X"
+    default n
+
+config M5APPLE2_LCD_MIRROR_Y
+    bool "Mirror LCD Y"
+    default y
+
+config M5APPLE2_INPUT_USE_UART
+    bool "Enable USB/UART console input fallback"
+    default y
+
+config M5APPLE2_CPU_HZ
+    int "Apple II master CPU clock"
+    default 1020484
+
+endmenu
+
