@@ -24,6 +24,8 @@ Usage:
   `0x3000` bytes mapped at `D000-FFFF`,
   `0x4000` bytes mapped at `C000-FFFF`,
   or full Apple II Plus `0x5000` byte dumps mapped at `B000-FFFF`.
+- Optionally place a Disk II controller ROM at `roms/disk2.rom`.
+  If present, it is embedded and mapped into slot 6 at `C600-C6FF`.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 

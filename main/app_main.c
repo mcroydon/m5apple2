@@ -21,6 +21,10 @@ static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 extern const uint8_t apple2plus_rom_start[] asm("_binary_apple2plus_rom_start");
 extern const uint8_t apple2plus_rom_end[] asm("_binary_apple2plus_rom_end");
 #endif
+#ifdef M5APPLE2_HAS_DISK2_ROM
+extern const uint8_t disk2_rom_start[] asm("_binary_disk2_rom_start");
+extern const uint8_t disk2_rom_end[] asm("_binary_disk2_rom_end");
+#endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
 {
@@ -77,12 +81,28 @@ static bool app_load_system_rom(void)
 #endif
 }
 
+static bool app_load_slot6_rom(void)
+{
+#ifdef M5APPLE2_HAS_DISK2_ROM
+    const size_t rom_size = (size_t)(disk2_rom_end - disk2_rom_start);
+    if (!apple2_machine_load_slot6_rom(&s_machine, disk2_rom_start, rom_size)) {
+        ESP_LOGE(TAG, "Embedded Disk II ROM rejected, size=%u", (unsigned)rom_size);
+        return false;
+    }
+    ESP_LOGI(TAG, "Loaded embedded Disk II ROM (%u bytes)", (unsigned)rom_size);
+    return true;
+#else
+    return false;
+#endif
+}
+
 void app_main(void)
 {
     apple2_config_t apple2_config = {
         .cpu_hz = CONFIG_M5APPLE2_CPU_HZ,
     };
     bool rom_loaded = false;
+    bool slot6_loaded = false;
     int64_t last_cpu_tick_us;
     int64_t last_frame_tick_us;
 
@@ -94,6 +114,10 @@ void app_main(void)
              s_display.native_width, s_display.native_height);
 
     rom_loaded = app_load_system_rom();
+    slot6_loaded = app_load_slot6_rom();
+    if (rom_loaded && !slot6_loaded) {
+        ESP_LOGW(TAG, "System ROM loaded without a separate Disk II ROM");
+    }
     if (!rom_loaded) {
         app_show_status_screen("PLACE APPLE2PLUS.ROM IN", "roms/ AND REBUILD.", "RUNS WITHOUT ROM SHOW STATUS.");
     }

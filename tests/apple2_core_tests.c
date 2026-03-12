@@ -136,6 +136,31 @@ static void test_full_apple2plus_rom_layout(void)
     assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
 }
 
+static void test_separate_slot6_rom_layout(void)
+{
+    apple2_machine_t machine;
+    uint8_t system_rom[0x3000];
+    uint8_t slot6_rom[0x0100];
+
+    memset(system_rom, 0, sizeof(system_rom));
+    memset(slot6_rom, 0, sizeof(slot6_rom));
+    system_rom[0x2FFC] = 0x62; /* RESET -> $FA62 */
+    system_rom[0x2FFD] = 0xFA;
+    slot6_rom[0x00] = 0xA2;
+    slot6_rom[0xFF] = 0x60;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    assert(apple2_machine_load_system_rom(&machine, system_rom, sizeof(system_rom)));
+    assert(!machine.slot6_rom_loaded);
+    assert(machine.memory[0xC600] == 0x00);
+
+    assert(apple2_machine_load_slot6_rom(&machine, slot6_rom, sizeof(slot6_rom)));
+    assert(machine.slot6_rom_loaded);
+    assert(machine.memory[0xC600] == 0xA2);
+    assert(machine.memory[0xC6FF] == 0x60);
+    assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -144,6 +169,7 @@ int main(void)
     test_video_addresses();
     test_text_render();
     test_full_apple2plus_rom_layout();
+    test_separate_slot6_rom_layout();
     puts("apple2 core tests passed");
     return 0;
 }
