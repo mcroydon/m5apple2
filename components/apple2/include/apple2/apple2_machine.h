@@ -31,9 +31,14 @@ typedef struct {
     uint64_t total_cycles;
     uint8_t memory[65536];
     uint8_t key_latch;
+    uint8_t floating_bus;
+    uint8_t annunciator_state;
+    uint8_t c8_slot;
     uint32_t speaker_toggles;
     apple2_video_state_t video;
     apple2_disk2_t disk2;
+    uint16_t system_rom_base;
+    size_t system_rom_size;
     bool system_rom_loaded;
     bool slot6_rom_loaded;
 } apple2_machine_t;

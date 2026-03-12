@@ -11,62 +11,124 @@
 #define APPLE2_SLOT6_ROM_BASE 0xC600U
 #define APPLE2_SLOT6_ROM_SIZE 0x0100U
 
+static bool apple2_is_system_rom_address(const apple2_machine_t *machine, uint16_t address)
+{
+    const uint32_t end = (uint32_t)machine->system_rom_base + (uint32_t)machine->system_rom_size;
+
+    if (!machine->system_rom_loaded || machine->system_rom_size == 0U) {
+        return false;
+    }
+
+    return (uint32_t)address >= (uint32_t)machine->system_rom_base &&
+           (uint32_t)address < end;
+}
+
+static uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
+{
+    machine->floating_bus = value;
+    return value;
+}
+
+static void apple2_select_slot_c8(apple2_machine_t *machine, uint16_t address)
+{
+    if (address >= 0xC100U && address < 0xC800U) {
+        machine->c8_slot = (uint8_t)((address >> 8) & 0x07U);
+    }
+}
+
 static uint8_t apple2_bus_read(void *context, uint16_t address)
 {
     apple2_machine_t *machine = context;
 
     switch (address) {
     case 0xC000:
-        return machine->key_latch;
+        return apple2_bus_value(machine, machine->key_latch);
     case 0xC010:
         machine->key_latch &= 0x7FU;
-        return machine->key_latch;
+        return apple2_bus_value(machine, machine->key_latch);
     case 0xC030:
         machine->speaker_toggles++;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC050:
         machine->video.text_mode = false;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC051:
         machine->video.text_mode = true;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC052:
         machine->video.mixed_mode = false;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC053:
         machine->video.mixed_mode = true;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC054:
         machine->video.page2 = false;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC055:
         machine->video.page2 = true;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC056:
         machine->video.hires_mode = false;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
     case 0xC057:
         machine->video.hires_mode = true;
-        return 0;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC058:
+        machine->annunciator_state &= (uint8_t)~0x01U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC059:
+        machine->annunciator_state |= 0x01U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05A:
+        machine->annunciator_state &= (uint8_t)~0x02U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05B:
+        machine->annunciator_state |= 0x02U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05C:
+        machine->annunciator_state &= (uint8_t)~0x04U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05D:
+        machine->annunciator_state |= 0x04U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05E:
+        machine->annunciator_state &= (uint8_t)~0x08U;
+        return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC05F:
+        machine->annunciator_state |= 0x08U;
+        return apple2_bus_value(machine, machine->floating_bus);
     default:
         break;
     }
 
     if (address >= 0xC0E0U && address <= 0xC0EFU) {
-        return apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU));
+        return apple2_bus_value(machine, apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU)));
     }
 
-    if ((address >= 0xC100U && address < APPLE2_SLOT6_ROM_BASE) ||
-        (address >= 0xC700U && address < APPLE2_ROM_BASE)) {
-        return 0x00;
+    if (address >= 0xC100U && address < 0xC800U) {
+        apple2_select_slot_c8(machine, address);
+        if (address >= APPLE2_SLOT6_ROM_BASE &&
+            address < (APPLE2_SLOT6_ROM_BASE + APPLE2_SLOT6_ROM_SIZE) &&
+            machine->slot6_rom_loaded) {
+            return apple2_bus_value(machine, machine->memory[address]);
+        }
+        return apple2_bus_value(machine, machine->floating_bus);
     }
 
-    return machine->memory[address];
+    if (address >= 0xC800U && address < APPLE2_ROM_BASE) {
+        if (address == 0xCFFFU) {
+            machine->c8_slot = 0U;
+        }
+        return apple2_bus_value(machine, machine->memory[address]);
+    }
+
+    return apple2_bus_value(machine, machine->memory[address]);
 }
 
 static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
 {
     apple2_machine_t *machine = context;
+    machine->floating_bus = value;
 
     switch (address) {
     case 0xC010:
@@ -98,6 +160,30 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
         return;
     case 0xC057:
         machine->video.hires_mode = true;
+        return;
+    case 0xC058:
+        machine->annunciator_state &= (uint8_t)~0x01U;
+        return;
+    case 0xC059:
+        machine->annunciator_state |= 0x01U;
+        return;
+    case 0xC05A:
+        machine->annunciator_state &= (uint8_t)~0x02U;
+        return;
+    case 0xC05B:
+        machine->annunciator_state |= 0x02U;
+        return;
+    case 0xC05C:
+        machine->annunciator_state &= (uint8_t)~0x04U;
+        return;
+    case 0xC05D:
+        machine->annunciator_state |= 0x04U;
+        return;
+    case 0xC05E:
+        machine->annunciator_state &= (uint8_t)~0x08U;
+        return;
+    case 0xC05F:
+        machine->annunciator_state |= 0x08U;
         return;
     default:
         break;
@@ -108,12 +194,21 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
         return;
     }
 
-    if (address >= APPLE2_ROM_BASE) {
+    if (address >= 0xC100U && address < 0xC800U) {
+        apple2_select_slot_c8(machine, address);
         return;
     }
-    if (address >= APPLE2_SLOT6_ROM_BASE && address < (APPLE2_SLOT6_ROM_BASE + APPLE2_SLOT6_ROM_SIZE)) {
+
+    if (address == 0xCFFFU) {
+        machine->c8_slot = 0U;
         return;
     }
+
+    if ((address >= APPLE2_SLOT6_ROM_BASE && address < (APPLE2_SLOT6_ROM_BASE + APPLE2_SLOT6_ROM_SIZE)) ||
+        apple2_is_system_rom_address(machine, address)) {
+        return;
+    }
+
     machine->memory[address] = value;
 }
 
@@ -136,6 +231,9 @@ void apple2_machine_init(apple2_machine_t *machine, const apple2_config_t *confi
 void apple2_machine_reset(apple2_machine_t *machine)
 {
     machine->key_latch = 0;
+    machine->floating_bus = 0;
+    machine->annunciator_state = 0;
+    machine->c8_slot = 0;
     machine->speaker_toggles = 0;
     machine->video.text_mode = true;
     machine->video.mixed_mode = false;
@@ -155,12 +253,18 @@ bool apple2_machine_load_system_rom(apple2_machine_t *machine, const uint8_t *ro
 
     if (rom_size == APPLE2_ROM_SIZE) {
         memcpy(&machine->memory[APPLE2_ROM_BASE], rom, APPLE2_ROM_SIZE);
+        machine->system_rom_base = APPLE2_ROM_BASE;
+        machine->system_rom_size = APPLE2_ROM_SIZE;
         machine->slot6_rom_loaded = false;
     } else if (rom_size == APPLE2_PLUS_ROM_SIZE) {
         memcpy(&machine->memory[APPLE2_PLUS_ROM_BASE], rom, APPLE2_PLUS_ROM_SIZE);
+        machine->system_rom_base = APPLE2_PLUS_ROM_BASE;
+        machine->system_rom_size = APPLE2_PLUS_ROM_SIZE;
         machine->slot6_rom_loaded = true;
     } else {
         memcpy(&machine->memory[0xC000], rom, 0x4000U);
+        machine->system_rom_base = 0xC000U;
+        machine->system_rom_size = 0x4000U;
         machine->slot6_rom_loaded = true;
     }
 

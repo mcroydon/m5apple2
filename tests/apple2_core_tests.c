@@ -82,6 +82,13 @@ static void test_soft_switches(void)
     assert(machine.video.page2);
     assert(machine.video.hires_mode);
 
+    apple2_machine_poke(&machine, 0xC059, 0);
+    apple2_machine_poke(&machine, 0xC05D, 0);
+    assert(machine.annunciator_state == 0x05U);
+    apple2_machine_poke(&machine, 0xC058, 0);
+    apple2_machine_poke(&machine, 0xC05C, 0);
+    assert(machine.annunciator_state == 0x00U);
+
     apple2_machine_set_key(&machine, 'a');
     assert(machine.key_latch == 0xC1);
     apple2_machine_poke(&machine, 0xC010, 0);
@@ -117,10 +124,19 @@ static void test_full_apple2plus_rom_layout(void)
 {
     apple2_machine_t machine;
     uint8_t rom[0x5000];
+    const uint8_t program[] = {
+        0xAD, 0x00, 0xC8,       /* LDA $C800 */
+        0x8D, 0x00, 0x03,       /* STA $0300 */
+        0xAD, 0xFF, 0xCF,       /* LDA $CFFF */
+        0x8D, 0x01, 0x03,       /* STA $0301 */
+        0xEA,                   /* NOP */
+    };
 
     memset(rom, 0, sizeof(rom));
     rom[0x1000] = 0x4C; /* C000 content should map for full images. */
     rom[0x1600] = 0xA9; /* C600 content should map too. */
+    rom[0x1800] = 0x5A; /* C800 motherboard ROM should stay visible. */
+    rom[0x1FFF] = 0xA5; /* CFFF should read underlying ROM and reset slot C8 select. */
     rom[0x4FFC] = 0x62; /* RESET -> $FA62 */
     rom[0x4FFD] = 0xFA;
 
@@ -134,6 +150,25 @@ static void test_full_apple2plus_rom_layout(void)
     assert(machine.memory[0xFFFC] == 0x62);
     assert(machine.memory[0xFFFD] == 0xFA);
     assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
+
+    apple2_machine_poke(&machine, 0xC600, 0);
+    assert(machine.c8_slot == 0x06U);
+    apple2_machine_poke(&machine, 0xCFFF, 0);
+    assert(machine.c8_slot == 0x00U);
+
+    apple2_machine_poke(&machine, 0xC800, 0x11);
+    assert(machine.memory[0xC800] == 0x5A);
+
+    memcpy(&machine.memory[0x0200], program, sizeof(program));
+    fill_reset_vector(&machine, 0x0200);
+    apple2_machine_reset(&machine);
+    for (int i = 0; i < 5; ++i) {
+        apple2_machine_step_instruction(&machine);
+    }
+
+    assert(machine.memory[0x0300] == 0x5A);
+    assert(machine.memory[0x0301] == 0xA5);
+    assert(machine.c8_slot == 0x00U);
 }
 
 static void test_separate_slot6_rom_layout(void)
