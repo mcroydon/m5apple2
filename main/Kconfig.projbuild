@@ -82,6 +82,28 @@ config M5APPLE2_LCD_PRESERVE_ASPECT
     default n if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default y
 
+config M5APPLE2_LCD_MARGIN_LEFT
+    int "LCD left safe margin"
+    range 0 40
+    default 4 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    default 0
+
+config M5APPLE2_LCD_MARGIN_RIGHT
+    int "LCD right safe margin"
+    range 0 40
+    default 0
+
+config M5APPLE2_LCD_MARGIN_TOP
+    int "LCD top safe margin"
+    range 0 40
+    default 0
+
+config M5APPLE2_LCD_MARGIN_BOTTOM
+    int "LCD bottom safe margin"
+    range 0 40
+    default 4 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    default 0
+
 config M5APPLE2_INPUT_USE_UART
     bool "Enable USB/UART console input fallback"
     default y
