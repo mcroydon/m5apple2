@@ -7,6 +7,14 @@
 #define APPLE2_DISK2_SECTOR_SIZE 256U
 #define APPLE2_DISK2_MAX_QUARTER_TRACK ((APPLE2_DISK2_TRACKS - 1U) * 4U)
 
+#define APPLE2_WOZ_HEADER_SIZE 12U
+#define APPLE2_WOZ_CHUNK_HEADER_SIZE 8U
+#define APPLE2_WOZ_V1_TRACK_SIZE 6656U
+#define APPLE2_WOZ_V1_TRACK_BYTES_OFFSET 6646U
+#define APPLE2_WOZ_V1_TRACK_BITS_OFFSET 6648U
+#define APPLE2_WOZ_V2_TRACK_COUNT APPLE2_DISK2_WOZ_TMAP_ENTRIES
+#define APPLE2_WOZ_V2_TRACK_ENTRY_SIZE 8U
+
 static const uint8_t s_disk2_gcr62[64] = {
     0x96, 0x97, 0x9A, 0x9B, 0x9D, 0x9E, 0x9F, 0xA6,
     0xA7, 0xAB, 0xAC, 0xAD, 0xAE, 0xAF, 0xB2, 0xB3,
@@ -34,6 +42,24 @@ static const int8_t s_stepper_state_for_mask[16] = {
     6, 7, -1, -1,
     5, -1, -1, -1,
 };
+
+static inline uint16_t disk2_le16(const uint8_t *data)
+{
+    return (uint16_t)data[0] | (uint16_t)((uint16_t)data[1] << 8);
+}
+
+static inline uint32_t disk2_le32(const uint8_t *data)
+{
+    return (uint32_t)data[0] |
+           ((uint32_t)data[1] << 8) |
+           ((uint32_t)data[2] << 16) |
+           ((uint32_t)data[3] << 24);
+}
+
+static inline uint16_t disk2_bits_to_bytes(uint32_t bit_count)
+{
+    return (uint16_t)((bit_count + 7U) / 8U);
+}
 
 static inline void disk2_encode44(uint8_t value, uint8_t *out_high, uint8_t *out_low)
 {
@@ -131,10 +157,41 @@ static size_t disk2_append_sector(uint8_t *out, uint8_t volume, uint8_t track, u
     return pos;
 }
 
-static bool disk2_build_track_cache(apple2_disk2_t *disk2)
+static void disk2_clear_drive_source(apple2_disk2_t *disk2, unsigned drive_index)
 {
-    const uint8_t drive = disk2->active_drive;
-    const uint8_t track = (uint8_t)(disk2->quarter_track[drive] / 4U);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_NONE;
+    disk2->image[drive_index] = NULL;
+    disk2->image_size[drive_index] = 0U;
+    disk2->image_order[drive_index] = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+    memset(&disk2->woz[drive_index], 0, sizeof(disk2->woz[drive_index]));
+    disk2->read_sector[drive_index] = NULL;
+    disk2->read_sector_context[drive_index] = NULL;
+    disk2->read_track[drive_index] = NULL;
+    disk2->read_track_context[drive_index] = NULL;
+}
+
+static bool disk2_set_track_cache(apple2_disk2_t *disk2,
+                                  uint8_t drive,
+                                  uint8_t quarter_track,
+                                  const uint8_t *track_data,
+                                  uint16_t track_length)
+{
+    if (track_data == NULL || track_length == 0U || track_length > APPLE2_DISK2_MAX_TRACK_BYTES) {
+        disk2->track_cache_valid = false;
+        return false;
+    }
+
+    memcpy(disk2->track_cache, track_data, track_length);
+    disk2->track_cache_valid = true;
+    disk2->track_cache_drive = drive;
+    disk2->track_cache_quarter_track = quarter_track;
+    disk2->track_cache_length = track_length;
+    return true;
+}
+
+static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive, uint8_t quarter_track)
+{
+    const uint8_t track = (uint8_t)(quarter_track / 4U);
     const uint8_t *track_order =
         (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)
             ? s_dos33_track_order
@@ -142,25 +199,17 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
     uint8_t sector_data[APPLE2_DISK2_SECTOR_SIZE];
     size_t pos = 0;
 
-    if (drive >= 2U || !disk2->loaded[drive]) {
-        return false;
-    }
-    if (disk2->track_cache_valid &&
-        disk2->track_cache_drive == drive &&
-        disk2->track_cache_track == track) {
-        return true;
-    }
-
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
         const uint8_t physical_sector = track_order[order_index];
         const uint8_t file_sector = order_index;
         const uint8_t *source = NULL;
 
-        if (disk2->image[drive] != NULL) {
+        if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_IMAGE) {
             const size_t sector_offset =
                 ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
             source = &disk2->image[drive][sector_offset];
-        } else if (disk2->read_sector[drive] != NULL) {
+        } else if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_READER &&
+                   disk2->read_sector[drive] != NULL) {
             if (!disk2->read_sector[drive](disk2->read_sector_context[drive],
                                            drive,
                                            track,
@@ -184,9 +233,83 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
 
     disk2->track_cache_valid = true;
     disk2->track_cache_drive = drive;
-    disk2->track_cache_track = track;
+    disk2->track_cache_quarter_track = quarter_track;
     disk2->track_cache_length = (uint16_t)pos;
     return true;
+}
+
+static bool disk2_build_track_cache(apple2_disk2_t *disk2)
+{
+    const uint8_t drive = disk2->active_drive;
+    const uint8_t quarter_track = disk2->quarter_track[drive];
+
+    if (drive >= 2U || !disk2->loaded[drive]) {
+        return false;
+    }
+    if (disk2->track_cache_valid &&
+        disk2->track_cache_drive == drive &&
+        disk2->track_cache_quarter_track == quarter_track) {
+        return true;
+    }
+
+    switch (disk2->source_kind[drive]) {
+    case APPLE2_DISK2_SOURCE_SECTOR_IMAGE:
+    case APPLE2_DISK2_SOURCE_SECTOR_READER:
+        return disk2_build_sector_track_cache(disk2, drive, quarter_track);
+
+    case APPLE2_DISK2_SOURCE_NIB_IMAGE: {
+        const uint8_t track = (uint8_t)(quarter_track / 4U);
+        const size_t offset = (size_t)track * APPLE2_DISK2_NIB_TRACK_BYTES;
+        return disk2_set_track_cache(disk2,
+                                     drive,
+                                     quarter_track,
+                                     &disk2->image[drive][offset],
+                                     APPLE2_DISK2_NIB_TRACK_BYTES);
+    }
+
+    case APPLE2_DISK2_SOURCE_WOZ_IMAGE: {
+        const uint8_t *track_data = NULL;
+        uint16_t track_length = 0;
+
+        if (!apple2_woz_get_track(&disk2->woz[drive],
+                                  disk2->image[drive],
+                                  disk2->image_size[drive],
+                                  quarter_track,
+                                  &track_data,
+                                  &track_length)) {
+            disk2->track_cache_valid = false;
+            return false;
+        }
+        return disk2_set_track_cache(disk2, drive, quarter_track, track_data, track_length);
+    }
+
+    case APPLE2_DISK2_SOURCE_TRACK_READER: {
+        uint16_t track_length = 0;
+
+        if (disk2->read_track[drive] == NULL ||
+            !disk2->read_track[drive](disk2->read_track_context[drive],
+                                      drive,
+                                      quarter_track,
+                                      disk2->track_cache,
+                                      &track_length) ||
+            track_length == 0U ||
+            track_length > APPLE2_DISK2_MAX_TRACK_BYTES) {
+            disk2->track_cache_valid = false;
+            return false;
+        }
+
+        disk2->track_cache_valid = true;
+        disk2->track_cache_drive = drive;
+        disk2->track_cache_quarter_track = quarter_track;
+        disk2->track_cache_length = track_length;
+        return true;
+    }
+
+    case APPLE2_DISK2_SOURCE_NONE:
+    default:
+        disk2->track_cache_valid = false;
+        return false;
+    }
 }
 
 static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool enabled)
@@ -252,6 +375,172 @@ static uint8_t disk2_read_next_byte(apple2_disk2_t *disk2)
     return disk2->data_latch;
 }
 
+bool apple2_woz_parse(apple2_woz_image_t *woz, const uint8_t *image, size_t image_size)
+{
+    const bool is_woz1 = image != NULL && image_size >= APPLE2_WOZ_HEADER_SIZE &&
+                         memcmp(image, "WOZ1", 4) == 0;
+    const bool is_woz2 = image != NULL && image_size >= APPLE2_WOZ_HEADER_SIZE &&
+                         memcmp(image, "WOZ2", 4) == 0;
+    size_t offset = APPLE2_WOZ_HEADER_SIZE;
+    bool have_info = false;
+    bool have_tmap = false;
+    bool have_trks = false;
+
+    if (woz == NULL) {
+        return false;
+    }
+
+    memset(woz, 0, sizeof(*woz));
+    memset(woz->tmap, 0xFF, sizeof(woz->tmap));
+
+    if (!is_woz1 && !is_woz2) {
+        return false;
+    }
+    if (image[4] != 0xFFU || image[5] != 0x0AU || image[6] != 0x0DU || image[7] != 0x0AU) {
+        return false;
+    }
+
+    woz->is_woz2 = is_woz2;
+    while ((offset + APPLE2_WOZ_CHUNK_HEADER_SIZE) <= image_size) {
+        const uint8_t *chunk_header = &image[offset];
+        const uint32_t chunk_size = disk2_le32(&chunk_header[4]);
+        const size_t chunk_data_offset = offset + APPLE2_WOZ_CHUNK_HEADER_SIZE;
+        const uint8_t *chunk_data;
+
+        if (chunk_data_offset > image_size || chunk_size > (image_size - chunk_data_offset)) {
+            return false;
+        }
+        chunk_data = &image[chunk_data_offset];
+
+        if (memcmp(chunk_header, "INFO", 4) == 0) {
+            if (chunk_size < 2U) {
+                return false;
+            }
+            woz->disk_type = chunk_data[1];
+            have_info = true;
+        } else if (memcmp(chunk_header, "TMAP", 4) == 0) {
+            if (chunk_size < APPLE2_DISK2_WOZ_TMAP_ENTRIES) {
+                return false;
+            }
+            memcpy(woz->tmap, chunk_data, APPLE2_DISK2_WOZ_TMAP_ENTRIES);
+            have_tmap = true;
+        } else if (memcmp(chunk_header, "TRKS", 4) == 0) {
+            if (is_woz1) {
+                const size_t track_count = chunk_size / APPLE2_WOZ_V1_TRACK_SIZE;
+
+                if (chunk_size == 0U || (chunk_size % APPLE2_WOZ_V1_TRACK_SIZE) != 0U) {
+                    return false;
+                }
+                for (size_t track_index = 0;
+                     track_index < track_count && track_index < APPLE2_DISK2_WOZ_TMAP_ENTRIES;
+                     ++track_index) {
+                    const size_t track_offset = chunk_data_offset + (track_index * APPLE2_WOZ_V1_TRACK_SIZE);
+                    const uint8_t *track_entry = &image[track_offset];
+                    uint16_t byte_count = disk2_le16(&track_entry[APPLE2_WOZ_V1_TRACK_BYTES_OFFSET]);
+                    const uint32_t bit_count = disk2_le16(&track_entry[APPLE2_WOZ_V1_TRACK_BITS_OFFSET]);
+
+                    if (byte_count == 0U && bit_count != 0U) {
+                        byte_count = disk2_bits_to_bytes(bit_count);
+                    }
+                    if (byte_count == 0U) {
+                        continue;
+                    }
+                    if (byte_count > APPLE2_WOZ_V1_TRACK_BYTES_OFFSET ||
+                        byte_count > APPLE2_DISK2_MAX_TRACK_BYTES) {
+                        return false;
+                    }
+
+                    woz->tracks[track_index].present = true;
+                    woz->tracks[track_index].offset = (uint32_t)track_offset;
+                    woz->tracks[track_index].bit_count = (bit_count != 0U)
+                                                            ? bit_count
+                                                            : (uint32_t)byte_count * 8U;
+                    woz->tracks[track_index].byte_count = byte_count;
+                }
+            } else {
+                if (chunk_size < (APPLE2_WOZ_V2_TRACK_COUNT * APPLE2_WOZ_V2_TRACK_ENTRY_SIZE)) {
+                    return false;
+                }
+                for (size_t track_index = 0; track_index < APPLE2_WOZ_V2_TRACK_COUNT; ++track_index) {
+                    const uint8_t *track_entry =
+                        &chunk_data[track_index * APPLE2_WOZ_V2_TRACK_ENTRY_SIZE];
+                    const uint16_t start_block = disk2_le16(track_entry);
+                    const uint16_t block_count = disk2_le16(&track_entry[2]);
+                    const uint32_t bit_count = disk2_le32(&track_entry[4]);
+                    const uint16_t byte_count = disk2_bits_to_bytes(bit_count);
+                    const uint32_t track_offset = (uint32_t)start_block * 512U;
+
+                    if (start_block == 0U || block_count == 0U || bit_count == 0U) {
+                        continue;
+                    }
+                    if (byte_count > (uint32_t)block_count * 512U ||
+                        byte_count > APPLE2_DISK2_MAX_TRACK_BYTES ||
+                        track_offset > image_size ||
+                        byte_count > (image_size - track_offset)) {
+                        return false;
+                    }
+
+                    woz->tracks[track_index].present = true;
+                    woz->tracks[track_index].offset = track_offset;
+                    woz->tracks[track_index].bit_count = bit_count;
+                    woz->tracks[track_index].byte_count = byte_count;
+                }
+            }
+            have_trks = true;
+        }
+
+        offset = chunk_data_offset + chunk_size;
+    }
+
+    if (!have_info || !have_tmap || !have_trks || woz->disk_type != 1U) {
+        return false;
+    }
+    for (size_t i = 0; i < APPLE2_DISK2_WOZ_TMAP_ENTRIES; ++i) {
+        const uint8_t track_index = woz->tmap[i];
+
+        if (track_index == 0xFFU) {
+            continue;
+        }
+        if (track_index >= APPLE2_DISK2_WOZ_TMAP_ENTRIES ||
+            !woz->tracks[track_index].present) {
+            return false;
+        }
+    }
+
+    woz->valid = true;
+    return true;
+}
+
+bool apple2_woz_get_track(const apple2_woz_image_t *woz,
+                          const uint8_t *image,
+                          size_t image_size,
+                          uint8_t quarter_track,
+                          const uint8_t **track_data,
+                          uint16_t *track_length)
+{
+    uint8_t track_index = 0xFFU;
+
+    if (track_data == NULL || track_length == NULL || woz == NULL || image == NULL || !woz->valid) {
+        return false;
+    }
+    if (quarter_track < APPLE2_DISK2_WOZ_TMAP_ENTRIES) {
+        track_index = woz->tmap[quarter_track];
+    }
+    if (track_index == 0xFFU ||
+        track_index >= APPLE2_DISK2_WOZ_TMAP_ENTRIES ||
+        !woz->tracks[track_index].present) {
+        return false;
+    }
+    if (woz->tracks[track_index].offset > image_size ||
+        woz->tracks[track_index].byte_count > (image_size - woz->tracks[track_index].offset)) {
+        return false;
+    }
+
+    *track_data = &image[woz->tracks[track_index].offset];
+    *track_length = woz->tracks[track_index].byte_count;
+    return true;
+}
+
 void apple2_disk2_init(apple2_disk2_t *disk2)
 {
     memset(disk2, 0, sizeof(*disk2));
@@ -289,15 +578,54 @@ bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
                                         size_t image_size,
                                         apple2_disk2_image_order_t image_order)
 {
-    if (drive_index >= 2U || image_size != APPLE2_DISK2_IMAGE_SIZE) {
+    if (drive_index >= 2U || image_size != APPLE2_DISK2_IMAGE_SIZE || image == NULL) {
         return false;
     }
 
+    disk2_clear_drive_source(disk2, drive_index);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_SECTOR_IMAGE;
     disk2->image[drive_index] = image;
     disk2->image_size[drive_index] = image_size;
     disk2->image_order[drive_index] = image_order;
-    disk2->read_sector[drive_index] = NULL;
-    disk2->read_sector_context[drive_index] = NULL;
+    disk2->loaded[drive_index] = true;
+    disk2->track_cache_valid = false;
+    return true;
+}
+
+bool apple2_disk2_load_nib_drive(apple2_disk2_t *disk2,
+                                 unsigned drive_index,
+                                 const uint8_t *image,
+                                 size_t image_size)
+{
+    if (drive_index >= 2U || image_size != APPLE2_DISK2_NIB_IMAGE_SIZE || image == NULL) {
+        return false;
+    }
+
+    disk2_clear_drive_source(disk2, drive_index);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_NIB_IMAGE;
+    disk2->image[drive_index] = image;
+    disk2->image_size[drive_index] = image_size;
+    disk2->loaded[drive_index] = true;
+    disk2->track_cache_valid = false;
+    return true;
+}
+
+bool apple2_disk2_load_woz_drive(apple2_disk2_t *disk2,
+                                 unsigned drive_index,
+                                 const uint8_t *image,
+                                 size_t image_size)
+{
+    apple2_woz_image_t woz;
+
+    if (drive_index >= 2U || image == NULL || !apple2_woz_parse(&woz, image, image_size)) {
+        return false;
+    }
+
+    disk2_clear_drive_source(disk2, drive_index);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_WOZ_IMAGE;
+    disk2->image[drive_index] = image;
+    disk2->image_size[drive_index] = image_size;
+    disk2->woz[drive_index] = woz;
     disk2->loaded[drive_index] = true;
     disk2->track_cache_valid = false;
     return true;
@@ -314,11 +642,30 @@ bool apple2_disk2_attach_drive_reader(apple2_disk2_t *disk2,
         return false;
     }
 
-    disk2->image[drive_index] = NULL;
+    disk2_clear_drive_source(disk2, drive_index);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_SECTOR_READER;
     disk2->image_size[drive_index] = image_size;
     disk2->image_order[drive_index] = image_order;
     disk2->read_sector[drive_index] = read_sector;
     disk2->read_sector_context[drive_index] = context;
+    disk2->loaded[drive_index] = true;
+    disk2->track_cache_valid = false;
+    return true;
+}
+
+bool apple2_disk2_attach_drive_track_reader(apple2_disk2_t *disk2,
+                                            unsigned drive_index,
+                                            apple2_disk2_read_track_fn read_track,
+                                            void *context)
+{
+    if (drive_index >= 2U || read_track == NULL) {
+        return false;
+    }
+
+    disk2_clear_drive_source(disk2, drive_index);
+    disk2->source_kind[drive_index] = APPLE2_DISK2_SOURCE_TRACK_READER;
+    disk2->read_track[drive_index] = read_track;
+    disk2->read_track_context[drive_index] = context;
     disk2->loaded[drive_index] = true;
     disk2->track_cache_valid = false;
     return true;
@@ -331,11 +678,7 @@ void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
     }
 
     disk2->loaded[drive_index] = false;
-    disk2->image[drive_index] = NULL;
-    disk2->image_size[drive_index] = 0U;
-    disk2->image_order[drive_index] = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
-    disk2->read_sector[drive_index] = NULL;
-    disk2->read_sector_context[drive_index] = NULL;
+    disk2_clear_drive_source(disk2, drive_index);
     disk2->quarter_track[drive_index] = 0U;
     disk2->nibble_pos[drive_index] = 0U;
     disk2->phase_mask[drive_index] = 0U;

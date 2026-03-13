@@ -50,9 +50,13 @@ bool apple2_machine_load_slot6_rom(apple2_machine_t *machine, const uint8_t *rom
 bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive0_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive0_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
+bool apple2_machine_load_drive0_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
+bool apple2_machine_load_drive0_woz(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive1_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive1_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
+bool apple2_machine_load_drive1_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
+bool apple2_machine_load_drive1_woz(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii);
 void apple2_machine_step(apple2_machine_t *machine, uint32_t cycles);
 uint32_t apple2_machine_step_instruction(apple2_machine_t *machine);

@@ -325,6 +325,16 @@ bool apple2_machine_load_drive0_po(apple2_machine_t *machine, const uint8_t *ima
                                                 APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
 }
 
+bool apple2_machine_load_drive0_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_nib_drive(&machine->disk2, 0, image, image_size);
+}
+
+bool apple2_machine_load_drive0_woz(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_woz_drive(&machine->disk2, 0, image, image_size);
+}
+
 bool apple2_machine_load_drive1_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
     return apple2_machine_load_drive_with_order(machine,
@@ -350,6 +360,16 @@ bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *ima
                                                 image,
                                                 image_size,
                                                 APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
+}
+
+bool apple2_machine_load_drive1_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_nib_drive(&machine->disk2, 1, image, image_size);
+}
+
+bool apple2_machine_load_drive1_woz(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_disk2_load_woz_drive(&machine->disk2, 1, image, image_size);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
