@@ -217,6 +217,7 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
     return (prodos_score > dos_score) ? APP_DISK_ORDER_PRODOS : APP_DISK_ORDER_DOS33;
 }
 
+#ifdef M5APPLE2_HAS_DOS33_DSK
 static app_disk_order_t app_probe_dsk_order(const uint8_t *image, size_t image_size)
 {
     const app_disk_source_t source = {
@@ -227,6 +228,7 @@ static app_disk_order_t app_probe_dsk_order(const uint8_t *image, size_t image_s
 
     return app_probe_dsk_order_source(&source);
 }
+#endif
 #endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
@@ -281,6 +283,7 @@ static bool app_load_memory_drive(unsigned drive_index,
                                               image_order);
 }
 
+#if defined(M5APPLE2_HAS_DOS33_DO) || defined(M5APPLE2_HAS_DOS33_PO) || defined(M5APPLE2_HAS_DOS33_DSK)
 static void app_set_builtin_drive(unsigned drive_index,
                                   const uint8_t *image,
                                   size_t image_size,
@@ -300,6 +303,7 @@ static void app_set_builtin_drive(unsigned drive_index,
              "%s",
              (label != NULL) ? label : "embedded");
 }
+#endif
 
 static bool app_restore_builtin_drive(unsigned drive_index)
 {

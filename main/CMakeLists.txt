@@ -6,6 +6,13 @@ idf_component_register(
 set(M5APPLE2_GENERATED_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated_assets")
 file(MAKE_DIRECTORY "${M5APPLE2_GENERATED_ASSET_DIR}")
 
+# Re-run CMake when user-supplied ROM or disk images are added or removed.
+file(GLOB M5APPLE2_EMBED_WATCH CONFIGURE_DEPENDS
+    "${PROJECT_DIR}/roms/*.rom"
+    "${PROJECT_DIR}/roms/*.do"
+    "${PROJECT_DIR}/roms/*.po"
+    "${PROJECT_DIR}/roms/*.dsk")
+
 function(m5apple2_add_embedded_rom source_path generated_name define_name)
     set(source_abs "${PROJECT_DIR}/${source_path}")
     set(embed_rel "generated_assets/${generated_name}")
