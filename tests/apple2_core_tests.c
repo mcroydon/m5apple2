@@ -134,6 +134,26 @@ static void test_text_render(void)
     assert(pixels[APPLE2_VIDEO_WIDTH * 3U + 3U] == APPLE2_COLOR_WHITE);
 }
 
+static void test_text_code_mapping(void)
+{
+    bool inverse = false;
+
+    assert(apple2_text_code_to_ascii(0x01U, &inverse) == 'A');
+    assert(inverse);
+
+    assert(apple2_text_code_to_ascii(0x31U, &inverse) == '1');
+    assert(inverse);
+
+    assert(apple2_text_code_to_ascii(0x71U, &inverse) == '1');
+    assert(!inverse);
+
+    assert(apple2_text_code_to_ascii(0xA0U, &inverse) == ' ');
+    assert(!inverse);
+
+    assert(apple2_text_code_to_ascii(0xC1U, &inverse) == 'A');
+    assert(!inverse);
+}
+
 static void test_full_apple2plus_rom_layout(void)
 {
     apple2_machine_t machine;
@@ -537,6 +557,7 @@ int main(void)
     test_soft_switches();
     test_video_addresses();
     test_text_render();
+    test_text_code_mapping();
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
     test_drive0_dsk_loading();

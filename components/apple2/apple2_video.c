@@ -90,22 +90,17 @@ const uint8_t *apple2_ascii_font(uint8_t ascii)
 
 uint8_t apple2_text_code_to_ascii(uint8_t code, bool *inverse)
 {
+    const uint8_t glyph_index = (uint8_t)(code & 0x3FU);
     uint8_t ascii;
 
     if ((code & 0x80U) != 0U) {
         *inverse = false;
-        ascii = (uint8_t)(code & 0x7FU);
     } else if ((code & 0x40U) != 0U) {
         *inverse = false;
-        ascii = (uint8_t)(code & 0x7FU);
     } else {
         *inverse = true;
-        ascii = (uint8_t)(code | 0x40U);
     }
-
-    if (ascii < 32U) {
-        ascii = (uint8_t)(ascii + 64U);
-    }
+    ascii = (glyph_index < 32U) ? (uint8_t)(glyph_index + 64U) : glyph_index;
 
     return ascii;
 }
