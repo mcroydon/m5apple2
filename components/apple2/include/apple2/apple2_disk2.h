@@ -12,11 +12,19 @@ typedef enum {
     APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL = 1,
 } apple2_disk2_image_order_t;
 
+typedef bool (*apple2_disk2_read_sector_fn)(void *context,
+                                            unsigned drive_index,
+                                            uint8_t track,
+                                            uint8_t file_sector,
+                                            uint8_t *sector_data);
+
 typedef struct {
     bool loaded[2];
     const uint8_t *image[2];
     size_t image_size[2];
     apple2_disk2_image_order_t image_order[2];
+    apple2_disk2_read_sector_fn read_sector[2];
+    void *read_sector_context[2];
     bool motor_on;
     uint8_t active_drive;
     bool q6;
@@ -41,5 +49,12 @@ bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
                                         const uint8_t *image,
                                         size_t image_size,
                                         apple2_disk2_image_order_t image_order);
+bool apple2_disk2_attach_drive_reader(apple2_disk2_t *disk2,
+                                      unsigned drive_index,
+                                      apple2_disk2_read_sector_fn read_sector,
+                                      void *context,
+                                      size_t image_size,
+                                      apple2_disk2_image_order_t image_order);
+void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index);
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index);
 uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg);

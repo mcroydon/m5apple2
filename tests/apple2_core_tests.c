@@ -214,6 +214,58 @@ static void test_drive0_dsk_loading(void)
     assert(!apple2_machine_load_drive0_dsk(&machine, image, sizeof(image) - 1U));
 }
 
+static bool test_disk_reader(void *context,
+                             unsigned drive_index,
+                             uint8_t track,
+                             uint8_t file_sector,
+                             uint8_t *sector_data)
+{
+    const uint8_t *image = context;
+    const size_t offset = (((size_t)track * 16U) + file_sector) * 256U;
+
+    (void)drive_index;
+    memcpy(sector_data, &image[offset], 256U);
+    return true;
+}
+
+static void test_drive1_and_reader_loading(void)
+{
+    apple2_machine_t machine;
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+    uint8_t first_byte = 0;
+
+    memset(image, 0x00, sizeof(image));
+    for (size_t i = 0; i < sizeof(image); ++i) {
+        image[i] = (uint8_t)i;
+    }
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    assert(apple2_machine_load_drive1_dsk(&machine, image, sizeof(image)));
+    assert(apple2_disk2_drive_loaded(&machine.disk2, 1));
+    assert(machine.disk2.image_order[1] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+    assert(apple2_machine_load_drive1_po(&machine, image, sizeof(image)));
+    assert(machine.disk2.image_order[1] == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
+
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_attach_drive_reader(&disk2,
+                                            1,
+                                            test_disk_reader,
+                                            image,
+                                            sizeof(image),
+                                            APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL));
+    disk2.active_drive = 1U;
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    first_byte = apple2_disk2_access(&disk2, 0xCU);
+
+    assert(disk2.track_cache_valid);
+    assert(disk2.track_cache_length != 0U);
+    assert(first_byte == disk2.track_cache[0]);
+
+    apple2_disk2_unload_drive(&disk2, 1);
+    assert(!apple2_disk2_drive_loaded(&disk2, 1));
+}
+
 static void test_disk2_stepper_quarter_tracks(void)
 {
     apple2_machine_t machine;
@@ -245,6 +297,7 @@ int main(void)
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
     test_drive0_dsk_loading();
+    test_drive1_and_reader_loading();
     test_disk2_stepper_quarter_tracks();
     puts("apple2 core tests passed");
     return 0;

@@ -285,31 +285,71 @@ bool apple2_machine_load_slot6_rom(apple2_machine_t *machine, const uint8_t *rom
     return true;
 }
 
-bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+static bool apple2_machine_load_drive_with_order(apple2_machine_t *machine,
+                                                 unsigned drive_index,
+                                                 const uint8_t *image,
+                                                 size_t image_size,
+                                                 apple2_disk2_image_order_t image_order)
 {
     return apple2_disk2_load_drive_with_order(&machine->disk2,
-                                              0,
+                                              drive_index,
                                               image,
                                               image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+                                              image_order);
+}
+
+bool apple2_machine_load_drive0_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_machine_load_drive_with_order(machine,
+                                                0,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
 }
 
 bool apple2_machine_load_drive0_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
-    return apple2_disk2_load_drive_with_order(&machine->disk2,
-                                              0,
-                                              image,
-                                              image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+    return apple2_machine_load_drive_with_order(machine,
+                                                0,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
 }
 
 bool apple2_machine_load_drive0_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
-    return apple2_disk2_load_drive_with_order(&machine->disk2,
-                                              0,
-                                              image,
-                                              image_size,
-                                              APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
+    return apple2_machine_load_drive_with_order(machine,
+                                                0,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
+}
+
+bool apple2_machine_load_drive1_dsk(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_machine_load_drive_with_order(machine,
+                                                1,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+}
+
+bool apple2_machine_load_drive1_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_machine_load_drive_with_order(machine,
+                                                1,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
+}
+
+bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
+{
+    return apple2_machine_load_drive_with_order(machine,
+                                                1,
+                                                image,
+                                                image_size,
+                                                APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL);
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
@@ -377,10 +417,11 @@ const char *apple2_machine_status(const apple2_machine_t *machine)
     static char buffer[128];
 
     snprintf(buffer, sizeof(buffer),
-             "ROM:%s slot6:%s d0:%s PC=%04x A=%02x X=%02x Y=%02x P=%02x cycles=%" PRIu64,
+             "ROM:%s slot6:%s d0:%s d1:%s PC=%04x A=%02x X=%02x Y=%02x P=%02x cycles=%" PRIu64,
              machine->system_rom_loaded ? "yes" : "no",
              machine->slot6_rom_loaded ? "yes" : "no",
              apple2_disk2_drive_loaded(&machine->disk2, 0) ? "yes" : "no",
+             apple2_disk2_drive_loaded(&machine->disk2, 1) ? "yes" : "no",
              machine->cpu.pc, machine->cpu.a, machine->cpu.x, machine->cpu.y,
              machine->cpu.p, machine->total_cycles);
     return buffer;

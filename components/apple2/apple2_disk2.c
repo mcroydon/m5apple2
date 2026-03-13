@@ -139,6 +139,7 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
         (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)
             ? s_dos33_track_order
             : s_prodos_track_order;
+    uint8_t sector_data[APPLE2_DISK2_SECTOR_SIZE];
     size_t pos = 0;
 
     if (drive >= 2U || !disk2->loaded[drive]) {
@@ -153,13 +154,32 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
         const uint8_t physical_sector = track_order[order_index];
         const uint8_t file_sector = order_index;
-        const size_t sector_offset =
-            ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
+        const uint8_t *source = NULL;
+
+        if (disk2->image[drive] != NULL) {
+            const size_t sector_offset =
+                ((size_t)track * APPLE2_DISK2_SECTORS + file_sector) * APPLE2_DISK2_SECTOR_SIZE;
+            source = &disk2->image[drive][sector_offset];
+        } else if (disk2->read_sector[drive] != NULL) {
+            if (!disk2->read_sector[drive](disk2->read_sector_context[drive],
+                                           drive,
+                                           track,
+                                           file_sector,
+                                           sector_data)) {
+                disk2->track_cache_valid = false;
+                return false;
+            }
+            source = sector_data;
+        } else {
+            disk2->track_cache_valid = false;
+            return false;
+        }
+
         pos += disk2_append_sector(&disk2->track_cache[pos],
                                    0xFEU,
                                    track,
                                    physical_sector,
-                                   &disk2->image[drive][sector_offset]);
+                                   source);
     }
 
     disk2->track_cache_valid = true;
@@ -276,9 +296,53 @@ bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
     disk2->image[drive_index] = image;
     disk2->image_size[drive_index] = image_size;
     disk2->image_order[drive_index] = image_order;
+    disk2->read_sector[drive_index] = NULL;
+    disk2->read_sector_context[drive_index] = NULL;
     disk2->loaded[drive_index] = true;
     disk2->track_cache_valid = false;
     return true;
+}
+
+bool apple2_disk2_attach_drive_reader(apple2_disk2_t *disk2,
+                                      unsigned drive_index,
+                                      apple2_disk2_read_sector_fn read_sector,
+                                      void *context,
+                                      size_t image_size,
+                                      apple2_disk2_image_order_t image_order)
+{
+    if (drive_index >= 2U || image_size != APPLE2_DISK2_IMAGE_SIZE || read_sector == NULL) {
+        return false;
+    }
+
+    disk2->image[drive_index] = NULL;
+    disk2->image_size[drive_index] = image_size;
+    disk2->image_order[drive_index] = image_order;
+    disk2->read_sector[drive_index] = read_sector;
+    disk2->read_sector_context[drive_index] = context;
+    disk2->loaded[drive_index] = true;
+    disk2->track_cache_valid = false;
+    return true;
+}
+
+void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
+{
+    if (drive_index >= 2U) {
+        return;
+    }
+
+    disk2->loaded[drive_index] = false;
+    disk2->image[drive_index] = NULL;
+    disk2->image_size[drive_index] = 0U;
+    disk2->image_order[drive_index] = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+    disk2->read_sector[drive_index] = NULL;
+    disk2->read_sector_context[drive_index] = NULL;
+    disk2->quarter_track[drive_index] = 0U;
+    disk2->nibble_pos[drive_index] = 0U;
+    disk2->phase_mask[drive_index] = 0U;
+    disk2->stepper_state[drive_index] = -1;
+    if (disk2->active_drive == drive_index) {
+        disk2->track_cache_valid = false;
+    }
 }
 
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index)
