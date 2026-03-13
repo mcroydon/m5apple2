@@ -120,6 +120,51 @@ static void test_fn_disk_commands(void)
     assert(ascii == CARDPUTER_INPUT_CMD_SD_RESCAN);
 }
 
+static void test_fn_arrow_commands(void)
+{
+    uint8_t ascii = 0;
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(1, 8),
+                                            (cardputer_keycoord_t){ .row = 1U, .column = 8U },
+                                            &ascii));
+    assert(ascii == 0x0BU);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(2, 8),
+                                            (cardputer_keycoord_t){ .row = 2U, .column = 8U },
+                                            &ascii));
+    assert(ascii == 0x08U);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(2, 9),
+                                            (cardputer_keycoord_t){ .row = 2U, .column = 9U },
+                                            &ascii));
+    assert(ascii == 0x0AU);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(2, 10),
+                                            (cardputer_keycoord_t){ .row = 2U, .column = 10U },
+                                            &ascii));
+    assert(ascii == 0x15U);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(2, 11),
+                                            (cardputer_keycoord_t){ .row = 2U, .column = 11U },
+                                            &ascii));
+    assert(ascii == 0x0BU);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(3, 10),
+                                            (cardputer_keycoord_t){ .row = 3U, .column = 10U },
+                                            &ascii));
+    assert(ascii == 0x08U);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(3, 11),
+                                            (cardputer_keycoord_t){ .row = 3U, .column = 11U },
+                                            &ascii));
+    assert(ascii == 0x0AU);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(3, 12),
+                                            (cardputer_keycoord_t){ .row = 3U, .column = 12U },
+                                            &ascii));
+    assert(ascii == 0x15U);
+}
+
 int main(void)
 {
     test_original_decode();
@@ -127,6 +172,7 @@ int main(void)
     test_ascii_translation();
     test_modifiers_do_not_emit_ascii();
     test_fn_disk_commands();
+    test_fn_arrow_commands();
     puts("cardputer keymap tests passed");
     return 0;
 }

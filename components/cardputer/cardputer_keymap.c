@@ -118,6 +118,39 @@ static bool cardputer_keymap_modifier_active(uint64_t pressed_mask, cardputer_ke
     return (pressed_mask & cardputer_keymap_mask_for_coord(coord)) != 0U;
 }
 
+static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
+{
+    switch (normal) {
+    case '0':
+        *ascii = CARDPUTER_INPUT_CMD_SD_RESCAN;
+        return true;
+    case '1':
+        *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE1;
+        return true;
+    case '2':
+        *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE2;
+        return true;
+    case 'i':
+    case ';':
+        *ascii = 0x0BU; /* Up */
+        return true;
+    case 'j':
+    case ',':
+        *ascii = 0x08U; /* Left */
+        return true;
+    case 'k':
+    case '.':
+        *ascii = 0x0AU; /* Down */
+        return true;
+    case 'l':
+    case '/':
+        *ascii = 0x15U; /* Right */
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool cardputer_keymap_decode_original(uint8_t select_index,
                                       uint8_t input_index,
                                       cardputer_keycoord_t *coord)
@@ -205,18 +238,8 @@ bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
     case CARDPUTER_KEY_KIND_CHAR:
         value = shift ? key->shifted : key->normal;
         if (fn) {
-            switch (value) {
-            case '0':
-                *ascii = CARDPUTER_INPUT_CMD_SD_RESCAN;
+            if (cardputer_keymap_fn_ascii_for_char(key->normal, ascii)) {
                 return true;
-            case '1':
-                *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE1;
-                return true;
-            case '2':
-                *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE2;
-                return true;
-            default:
-                break;
             }
         }
         if (ctrl) {

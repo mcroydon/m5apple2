@@ -47,6 +47,9 @@ Usage:
   `Fn+1` cycles drive 1,
   `Fn+2` cycles drive 2,
   `Fn+0` rescans the SD card.
+- On-device Apple II cursor hotkeys:
+  `Fn+I/J/K/L` emits up/left/down/right,
+  and `Fn+; , . /` provides the same directions on the punctuation cluster.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
