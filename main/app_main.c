@@ -15,6 +15,7 @@
 
 static const char *TAG = "m5apple2";
 static apple2_machine_t s_machine;
+static apple2_machine_t s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 
@@ -62,29 +63,30 @@ static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_
 
 static int app_score_dsk_order(const uint8_t *image, size_t image_size, app_disk_order_t order)
 {
-    apple2_machine_t probe;
+    apple2_machine_t *probe = &s_probe_machine;
     bool entered_stage2 = false;
     bool loaded = false;
 
-    apple2_machine_init(&probe, &(apple2_config_t){ .cpu_hz = CONFIG_M5APPLE2_CPU_HZ });
-    if (!apple2_machine_load_system_rom(&probe,
+    /* A full probe machine is too large for the ESP-IDF main task stack. */
+    apple2_machine_init(probe, &(apple2_config_t){ .cpu_hz = CONFIG_M5APPLE2_CPU_HZ });
+    if (!apple2_machine_load_system_rom(probe,
                                         apple2plus_rom_start,
                                         (size_t)(apple2plus_rom_end - apple2plus_rom_start)) ||
-        !apple2_machine_load_slot6_rom(&probe,
+        !apple2_machine_load_slot6_rom(probe,
                                        disk2_rom_start,
                                        (size_t)(disk2_rom_end - disk2_rom_start))) {
         return INT_MIN / 2;
     }
 
     loaded = (order == APP_DISK_ORDER_PRODOS)
-                 ? apple2_machine_load_drive0_po(&probe, image, image_size)
-                 : apple2_machine_load_drive0_dsk(&probe, image, image_size);
+                 ? apple2_machine_load_drive0_po(probe, image, image_size)
+                 : apple2_machine_load_drive0_dsk(probe, image, image_size);
     if (!loaded) {
         return INT_MIN / 2;
     }
 
     for (uint32_t i = 0; i < APP_DSK_PROBE_INSTRUCTIONS; ++i) {
-        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(probe);
 
         if (cpu.pc >= 0x3700U && cpu.pc < 0x4000U) {
             entered_stage2 = true;
@@ -93,23 +95,23 @@ static int app_score_dsk_order(const uint8_t *image, size_t image_size, app_disk
             if (cpu.pc < 0x0100U) {
                 break;
             }
-            if (cpu.pc >= 0xFD00U && probe.disk2.nibble_pos[0] <= 384U) {
+            if (cpu.pc >= 0xFD00U && probe->disk2.nibble_pos[0] <= 384U) {
                 break;
             }
         }
-        apple2_machine_step_instruction(&probe);
+        apple2_machine_step_instruction(probe);
     }
 
     {
-        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(probe);
         int score = 0;
 
-        score += (int)app_count_nonzero_range(&probe, 0x1D00U, 0x0400U);
-        score += (int)app_count_nonzero_range(&probe, 0x2A00U, 0x0100U);
-        if (probe.disk2.nibble_pos[0] > 384U) {
+        score += (int)app_count_nonzero_range(probe, 0x1D00U, 0x0400U);
+        score += (int)app_count_nonzero_range(probe, 0x2A00U, 0x0100U);
+        if (probe->disk2.nibble_pos[0] > 384U) {
             score += 512;
         }
-        if (probe.disk2.quarter_track[0] != 0U) {
+        if (probe->disk2.quarter_track[0] != 0U) {
             score += 128;
         }
         if (cpu.pc >= 0x3000U && cpu.pc < 0x4000U) {
@@ -334,8 +336,8 @@ void app_main(void)
                                                              APPLE2_VIDEO_WIDTH,
                                                              APPLE2_VIDEO_HEIGHT));
             last_frame_tick_us = now_us;
-        } else {
-            vTaskDelay(pdMS_TO_TICKS(1));
         }
+
+        vTaskDelay(pdMS_TO_TICKS(1));
     }
 }
