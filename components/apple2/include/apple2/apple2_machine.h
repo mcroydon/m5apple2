@@ -39,6 +39,7 @@ typedef struct {
     apple2_disk2_t disk2;
     uint16_t system_rom_base;
     size_t system_rom_size;
+    bool motherboard_rom_loaded;
     bool system_rom_loaded;
     bool slot6_rom_loaded;
 } apple2_machine_t;

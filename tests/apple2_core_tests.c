@@ -173,6 +173,9 @@ static void test_full_apple2plus_rom_layout(void)
     apple2_machine_poke(&machine, 0xC800, 0x11);
     assert(machine.memory[0xC800] == 0x5A);
 
+    apple2_machine_poke(&machine, 0xB700, 0x77);
+    assert(machine.memory[0xB700] == 0x77);
+
     memcpy(&machine.memory[0x0200], program, sizeof(program));
     fill_reset_vector(&machine, 0x0200);
     apple2_machine_reset(&machine);

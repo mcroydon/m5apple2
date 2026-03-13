@@ -29,3 +29,16 @@ into `roms/`, set `APPLE2_TEST_DISK` to a `.do`, `.po`, or `.dsk` path:
 ```sh
 APPLE2_TEST_DISK=VisiCalc_1984_Software_Arts.do sh tests/run_rom_smoke.sh
 ```
+
+For non-DOS application disks, you can also assert that boot reaches a known
+screen prompt by setting `APPLE2_TEST_EXPECT_TEXT`. VisiCalc, for example,
+should reach its 80-column question:
+
+```sh
+APPLE2_TEST_DISK=VisiCalc_1984_Software_Arts.do \
+APPLE2_TEST_EXPECT_TEXT="DO YOU WANT TO USE 80 COLUMNS" \
+sh tests/run_rom_smoke.sh
+```
+
+If a custom disk needs more runtime, override the host smoke budget with
+`APPLE2_TEST_INSTRUCTION_LIMIT`.

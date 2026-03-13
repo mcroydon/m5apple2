@@ -18,6 +18,7 @@ typedef enum {
 
 #define DSK_PROBE_INSTRUCTIONS 900000U
 #define DOS_PROMPT_INSTRUCTIONS 17000000U
+#define CUSTOM_DISK_INSTRUCTIONS 40000000U
 
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
@@ -226,6 +227,8 @@ int main(void)
     FILE *rom_file = fopen("roms/apple2plus.rom", "rb");
     FILE *slot6_file = fopen("roms/disk2.rom", "rb");
     const char *disk_override = getenv("APPLE2_TEST_DISK");
+    const char *expected_text = getenv("APPLE2_TEST_EXPECT_TEXT");
+    const char *instruction_limit_override = getenv("APPLE2_TEST_INSTRUCTION_LIMIT");
     const char *disk_path = NULL;
     FILE *disk_file = NULL;
     uint8_t rom[0x8000];
@@ -243,6 +246,19 @@ int main(void)
     bool advanced_loader = false;
     bool dos_prompt_ready = false;
     bool dos_command_echoed = false;
+    bool expected_text_ready = false;
+    uint32_t custom_instruction_limit = CUSTOM_DISK_INSTRUCTIONS;
+
+    if (expected_text != NULL && expected_text[0] == '\0') {
+        expected_text = NULL;
+    }
+    if (instruction_limit_override != NULL && instruction_limit_override[0] != '\0') {
+        const unsigned long parsed = strtoul(instruction_limit_override, NULL, 10);
+
+        if (parsed != 0UL && parsed <= UINT32_MAX) {
+            custom_instruction_limit = (uint32_t)parsed;
+        }
+    }
 
     if (rom_file == NULL) {
         perror("roms/apple2plus.rom");
@@ -340,9 +356,12 @@ int main(void)
 
     {
         const bool expect_prodos_prompt =
+            expected_text == NULL &&
             disk_size != 0U &&
             (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER);
-        const uint32_t instruction_limit = expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 1500000U;
+        const uint32_t instruction_limit =
+            expected_text != NULL ? custom_instruction_limit :
+            expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 1500000U;
 
         for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
@@ -368,6 +387,10 @@ int main(void)
             entered_stage2 &&
             cpu.pc >= 0xFD00U &&
             machine.disk2.nibble_pos[0] <= 384U) {
+            break;
+        }
+        if (expected_text != NULL && disk_screen_contains(&machine, expected_text)) {
+            expected_text_ready = true;
             break;
         }
         if (expect_prodos_prompt &&
@@ -401,6 +424,23 @@ int main(void)
         fprintf(stderr, "Disk boot did not reach DOS boot code, pc=%04x m800=%02x m801=%02x\n",
                 cpu.pc, machine.memory[0x0800], machine.memory[0x0801]);
         return 6;
+    }
+    if (expected_text != NULL) {
+        if (!expected_text_ready) {
+            const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+            fprintf(stderr,
+                    "Disk boot did not reach expected text \"%s\", pc=%04x qt=%u np=%u row5=%02x row6=%02x\n",
+                    expected_text,
+                    cpu.pc,
+                    machine.disk2.quarter_track[0],
+                    machine.disk2.nibble_pos[0],
+                    machine.memory[apple2_text_row_address(false, 5U)],
+                    machine.memory[apple2_text_row_address(false, 6U)]);
+            return 14;
+        }
+
+        puts("apple2 ROM+disk custom smoke passed");
+        return 0;
     }
     if (disk_size != 0U && !stage1_preloaded) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);

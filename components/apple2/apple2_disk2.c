@@ -67,6 +67,55 @@ static inline void disk2_encode44(uint8_t value, uint8_t *out_high, uint8_t *out
     *out_low = (uint8_t)((value & 0x55U) | 0xAAU);
 }
 
+static uint8_t disk2_find_file_sector_for_physical(const uint8_t *track_order, uint8_t physical_sector)
+{
+    for (uint8_t file_sector = 0; file_sector < APPLE2_DISK2_SECTORS; ++file_sector) {
+        if (track_order[file_sector] == physical_sector) {
+            return file_sector;
+        }
+    }
+
+    return 0U;
+}
+
+static bool disk2_boot_track_sequence(const uint8_t *sector0,
+                                      const uint8_t *default_track_order,
+                                      uint8_t *sequence)
+{
+    bool seen[APPLE2_DISK2_SECTORS] = { false };
+    size_t count = 0;
+    const uint8_t initial_index = sector0[0xFFU];
+
+    if (initial_index >= APPLE2_DISK2_SECTORS) {
+        return false;
+    }
+
+    sequence[count++] = 0U;
+    seen[0] = true;
+
+    for (int index = initial_index; index >= 0; --index) {
+        const uint8_t physical_sector = sector0[0x4DU + (uint8_t)index];
+
+        if (physical_sector >= APPLE2_DISK2_SECTORS || seen[physical_sector]) {
+            continue;
+        }
+        sequence[count++] = physical_sector;
+        seen[physical_sector] = true;
+    }
+
+    for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
+        const uint8_t physical_sector = default_track_order[order_index];
+
+        if (seen[physical_sector]) {
+            continue;
+        }
+        sequence[count++] = physical_sector;
+        seen[physical_sector] = true;
+    }
+
+    return count == APPLE2_DISK2_SECTORS;
+}
+
 static size_t disk2_append_sector(uint8_t *out, uint8_t volume, uint8_t track, uint8_t sector, const uint8_t *data)
 {
     uint8_t aux[86];
@@ -195,12 +244,34 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
         (disk2->image_order[drive] == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)
             ? s_dos33_track_order
             : s_prodos_track_order;
+    uint8_t boot_track_order[APPLE2_DISK2_SECTORS];
+    const uint8_t *physical_sequence = track_order;
     uint8_t sector_data[APPLE2_DISK2_SECTOR_SIZE];
     size_t pos = 0;
 
+    if (track == 0U) {
+        const uint8_t *sector0 = NULL;
+
+        if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_IMAGE) {
+            sector0 = &disk2->image[drive][0];
+        } else if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_READER &&
+                   disk2->read_sector[drive] != NULL &&
+                   disk2->read_sector[drive](disk2->read_sector_context[drive],
+                                            drive,
+                                            0U,
+                                            0U,
+                                            sector_data)) {
+            sector0 = sector_data;
+        }
+
+        if (sector0 != NULL && disk2_boot_track_sequence(sector0, track_order, boot_track_order)) {
+            physical_sequence = boot_track_order;
+        }
+    }
+
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
-        const uint8_t physical_sector = track_order[order_index];
-        const uint8_t file_sector = order_index;
+        const uint8_t physical_sector = physical_sequence[order_index];
+        const uint8_t file_sector = disk2_find_file_sector_for_physical(track_order, physical_sector);
         const uint8_t *source = NULL;
 
         if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_IMAGE) {

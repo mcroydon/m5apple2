@@ -6,8 +6,10 @@
 
 #define APPLE2_ROM_BASE 0xD000U
 #define APPLE2_ROM_SIZE 0x3000U
-#define APPLE2_PLUS_ROM_BASE 0xB000U
+#define APPLE2_FULL_DUMP_BASE 0xB000U
 #define APPLE2_PLUS_ROM_SIZE 0x5000U
+#define APPLE2_BOARD_ROM_BASE 0xC800U
+#define APPLE2_BOARD_ROM_SIZE 0x0800U
 #define APPLE2_SLOT6_ROM_BASE 0xC600U
 #define APPLE2_SLOT6_ROM_SIZE 0x0100U
 
@@ -21,6 +23,13 @@ static bool apple2_is_system_rom_address(const apple2_machine_t *machine, uint16
 
     return (uint32_t)address >= (uint32_t)machine->system_rom_base &&
            (uint32_t)address < end;
+}
+
+static bool apple2_is_board_rom_address(const apple2_machine_t *machine, uint16_t address)
+{
+    return machine->motherboard_rom_loaded &&
+           address >= APPLE2_BOARD_ROM_BASE &&
+           address < (APPLE2_BOARD_ROM_BASE + APPLE2_BOARD_ROM_SIZE);
 }
 
 static uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
@@ -205,6 +214,7 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
     }
 
     if ((address >= APPLE2_SLOT6_ROM_BASE && address < (APPLE2_SLOT6_ROM_BASE + APPLE2_SLOT6_ROM_SIZE)) ||
+        apple2_is_board_rom_address(machine, address) ||
         apple2_is_system_rom_address(machine, address)) {
         return;
     }
@@ -255,16 +265,19 @@ bool apple2_machine_load_system_rom(apple2_machine_t *machine, const uint8_t *ro
         memcpy(&machine->memory[APPLE2_ROM_BASE], rom, APPLE2_ROM_SIZE);
         machine->system_rom_base = APPLE2_ROM_BASE;
         machine->system_rom_size = APPLE2_ROM_SIZE;
+        machine->motherboard_rom_loaded = false;
         machine->slot6_rom_loaded = false;
     } else if (rom_size == APPLE2_PLUS_ROM_SIZE) {
-        memcpy(&machine->memory[APPLE2_PLUS_ROM_BASE], rom, APPLE2_PLUS_ROM_SIZE);
-        machine->system_rom_base = APPLE2_PLUS_ROM_BASE;
-        machine->system_rom_size = APPLE2_PLUS_ROM_SIZE;
+        memcpy(&machine->memory[0xC000], &rom[0xC000U - APPLE2_FULL_DUMP_BASE], 0x4000U);
+        machine->system_rom_base = APPLE2_ROM_BASE;
+        machine->system_rom_size = APPLE2_ROM_SIZE;
+        machine->motherboard_rom_loaded = true;
         machine->slot6_rom_loaded = true;
     } else {
         memcpy(&machine->memory[0xC000], rom, 0x4000U);
-        machine->system_rom_base = 0xC000U;
-        machine->system_rom_size = 0x4000U;
+        machine->system_rom_base = APPLE2_ROM_BASE;
+        machine->system_rom_size = APPLE2_ROM_SIZE;
+        machine->motherboard_rom_loaded = true;
         machine->slot6_rom_loaded = true;
     }
 
