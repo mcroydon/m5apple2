@@ -22,3 +22,10 @@ DOS stage-2 entry page at `$3700`. For ProDOS-order images and probed `.dsk`
 images that choose that path, the smoke also verifies that the later loader
 seeks off track 0, reaches the DOS 3.3 `]` prompt, and echoes a typed
 `PRINT 1<RETURN>` command through the Apple II keyboard latch path.
+
+To run the ROM smoke against a different local disk image without renaming it
+into `roms/`, set `APPLE2_TEST_DISK` to a `.do`, `.po`, or `.dsk` path:
+
+```sh
+APPLE2_TEST_DISK=VisiCalc_1984_Software_Arts.do sh tests/run_rom_smoke.sh
+```

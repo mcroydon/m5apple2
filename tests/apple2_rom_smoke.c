@@ -197,11 +197,37 @@ static bool disk_screen_contains(const apple2_machine_t *machine, const char *te
     return false;
 }
 
+static const char *disk_extension(const char *path)
+{
+    const char *extension = strrchr(path, '.');
+
+    return extension != NULL ? extension : "";
+}
+
+static disk_image_type_t disk_type_for_path(const char *path)
+{
+    const char *extension = disk_extension(path);
+
+    if (strcmp(extension, ".do") == 0 || strcmp(extension, ".DO") == 0) {
+        return DISK_IMAGE_DO_DOS_ORDER;
+    }
+    if (strcmp(extension, ".po") == 0 || strcmp(extension, ".PO") == 0) {
+        return DISK_IMAGE_PO_PRODOS_ORDER;
+    }
+    if (strcmp(extension, ".dsk") == 0 || strcmp(extension, ".DSK") == 0) {
+        return DISK_IMAGE_DSK_PRODOS_ORDER;
+    }
+
+    return DISK_IMAGE_NONE;
+}
+
 int main(void)
 {
     FILE *rom_file = fopen("roms/apple2plus.rom", "rb");
     FILE *slot6_file = fopen("roms/disk2.rom", "rb");
-    FILE *disk_file = fopen("roms/dos_3.3.do", "rb");
+    const char *disk_override = getenv("APPLE2_TEST_DISK");
+    const char *disk_path = NULL;
+    FILE *disk_file = NULL;
     uint8_t rom[0x8000];
     uint8_t slot6_rom[0x0100];
     uint8_t disk[APPLE2_DISK2_IMAGE_SIZE];
@@ -229,22 +255,44 @@ int main(void)
         slot6_rom_size = fread(slot6_rom, 1, sizeof(slot6_rom), slot6_file);
         fclose(slot6_file);
     }
-    if (disk_file != NULL) {
+    if (disk_override != NULL && disk_override[0] != '\0') {
+        disk_path = disk_override;
+        disk_type = disk_type_for_path(disk_path);
+        if (disk_type == DISK_IMAGE_NONE) {
+            fprintf(stderr, "unsupported disk extension for %s\n", disk_path);
+            return 12;
+        }
+        disk_file = fopen(disk_path, "rb");
+        if (disk_file == NULL) {
+            perror(disk_path);
+            return 13;
+        }
         disk_size = fread(disk, 1, sizeof(disk), disk_file);
         fclose(disk_file);
-        disk_type = DISK_IMAGE_DO_DOS_ORDER;
     } else {
-        disk_file = fopen("roms/dos_3.3.po", "rb");
+        disk_path = "roms/dos_3.3.do";
+        disk_file = fopen(disk_path, "rb");
         if (disk_file != NULL) {
             disk_size = fread(disk, 1, sizeof(disk), disk_file);
             fclose(disk_file);
-            disk_type = DISK_IMAGE_PO_PRODOS_ORDER;
+            disk_type = DISK_IMAGE_DO_DOS_ORDER;
         } else {
-            disk_file = fopen("roms/dos_3.3.dsk", "rb");
+            disk_path = "roms/dos_3.3.po";
+            disk_file = fopen(disk_path, "rb");
             if (disk_file != NULL) {
                 disk_size = fread(disk, 1, sizeof(disk), disk_file);
                 fclose(disk_file);
-                disk_type = DISK_IMAGE_DSK_PRODOS_ORDER;
+                disk_type = DISK_IMAGE_PO_PRODOS_ORDER;
+            } else {
+                disk_path = "roms/dos_3.3.dsk";
+                disk_file = fopen(disk_path, "rb");
+                if (disk_file != NULL) {
+                    disk_size = fread(disk, 1, sizeof(disk), disk_file);
+                    fclose(disk_file);
+                    disk_type = DISK_IMAGE_DSK_PRODOS_ORDER;
+                } else {
+                    disk_path = NULL;
+                }
             }
         }
     }
@@ -283,7 +331,9 @@ int main(void)
         }
 
         if (!loaded) {
-            fprintf(stderr, "unsupported disk image size: %zu\n", disk_size);
+            fprintf(stderr, "unsupported disk image size: %zu (%s)\n",
+                    disk_size,
+                    disk_path != NULL ? disk_path : "unknown");
             return 5;
         }
     }
