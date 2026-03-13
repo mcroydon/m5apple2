@@ -230,6 +230,11 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
                                    source);
     }
 
+    if (pos < APPLE2_DISK2_NIB_TRACK_BYTES) {
+        memset(&disk2->track_cache[pos], 0xFF, APPLE2_DISK2_NIB_TRACK_BYTES - pos);
+        pos = APPLE2_DISK2_NIB_TRACK_BYTES;
+    }
+
     disk2->track_cache_valid = true;
     disk2->track_cache_drive = drive;
     disk2->track_cache_quarter_track = quarter_track;

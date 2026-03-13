@@ -347,7 +347,7 @@ static void test_drive1_and_reader_loading(void)
     first_byte = apple2_disk2_access(&disk2, 0xCU);
 
     assert(disk2.track_cache_valid);
-    assert(disk2.track_cache_length != 0U);
+    assert(disk2.track_cache_length == APPLE2_DISK2_NIB_TRACK_BYTES);
     assert(first_byte == disk2.track_cache[0]);
 
     apple2_disk2_unload_drive(&disk2, 1);
