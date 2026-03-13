@@ -8,7 +8,8 @@ Current scope:
 - Apple II/II+ compatible 6502 core with Apple II soft switches
 - Text, lo-res, and hi-res video rendering with artifact-color approximation
 - ST7789 LCD front end for Cardputer-class ESP32-S3 hardware via `esp_lcd`
-- USB/UART console input path for development on-device
+- Cardputer keyboard input for the original Cardputer matrix and ADV keypad controller
+- USB/UART console input fallback for development on-device
 - Optional embedded ROM loading from `roms/apple2plus.rom`
 - Read-only Disk II slot-6 boot support for 140 KB `.do`, `.po`, or `.dsk` images
 - Host-side regression tests for CPU, video mapping, soft switches, and disk boot smoke
@@ -47,7 +48,11 @@ Current limitations:
   and on ambiguous `.dsk` images that probe to that same layout.
 - The host-side ROM smoke also verifies prompt-side Apple II keyboard input by
   typing `PRINT 1<RETURN>` through the emulated key latch.
-- Built-in Cardputer keyboard matrix scanning is still not implemented, so the
-  DOS prompt is only usable through the console input fallback today.
+- The original Cardputer keyboard now scans its 74HC138-driven matrix on-device
+  and injects ASCII directly into the Apple II key latch path.
+- The ADV build now includes a TCA8418 keypad backend wired through the same
+  ASCII path. The logical key mapping follows the official matrix layout and
+  still needs hardware validation on an ADV unit.
+- GPIO0 is treated as an emulator reset button and injects `ESC`.
 - The display pins and offsets are configurable in `menuconfig`, but the ADV
   profile still needs hardware validation.

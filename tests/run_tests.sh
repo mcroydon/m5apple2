@@ -11,3 +11,11 @@ cc -std=c11 -Wall -Wextra -Werror \
   -o tests/apple2_core_tests
 
 ./tests/apple2_core_tests
+
+cc -std=c11 -Wall -Wextra -Werror \
+  -Icomponents/cardputer/include \
+  components/cardputer/cardputer_keymap.c \
+  tests/cardputer_keymap_tests.c \
+  -o tests/cardputer_keymap_tests
+
+./tests/cardputer_keymap_tests

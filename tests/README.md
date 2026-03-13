@@ -4,6 +4,9 @@ Run the host-side emulator regression tests with:
 sh tests/run_tests.sh
 ```
 
+This now covers both the Apple II core and the Cardputer keyboard translation
+layer that turns original/ADV matrix positions into Apple II-facing ASCII.
+
 If a local `roms/apple2plus.rom` is present, you can also run a ROM smoke test:
 
 ```sh
