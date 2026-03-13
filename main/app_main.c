@@ -47,7 +47,7 @@ extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
 #endif
 
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
-#define APP_SD_MOUNT_POINT "/apple2"
+#define APP_SD_MOUNT_POINT "/sd"
 
 typedef enum {
     APP_DISK_ORDER_DOS33 = 0,

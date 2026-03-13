@@ -37,7 +37,7 @@ Usage:
   ProDOS-order based on which boot path looks more plausible.
 - Optionally place additional `140 KB` `.do`, `.po`, or `.dsk` images in the
   root of a FAT-formatted SD card.
-  On startup, the app mounts `/apple2`, scans for disk images, and auto-inserts:
+  On startup, the app mounts `/sd`, scans for disk images, and auto-inserts:
   the first SD image into drive 2 when an embedded boot disk is present, or
   the first two SD images into drives 1 and 2 when no embedded disk is built in.
 - On-device SD hotkeys:
