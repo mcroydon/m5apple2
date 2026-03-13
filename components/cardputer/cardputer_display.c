@@ -34,6 +34,12 @@
 #define M5APPLE2_LCD_PRESERVE_ASPECT_VALUE false
 #endif
 
+#ifdef CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+#define M5APPLE2_LCD_TRANS_QUEUE_DEPTH 1
+#else
+#define M5APPLE2_LCD_TRANS_QUEUE_DEPTH 10
+#endif
+
 #ifndef CONFIG_M5APPLE2_LCD_MARGIN_LEFT
 #ifdef CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
 #define CONFIG_M5APPLE2_LCD_MARGIN_LEFT 4
@@ -196,7 +202,9 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
         .cs_gpio_num = CONFIG_M5APPLE2_LCD_PIN_CS,
         .pclk_hz = 40 * 1000 * 1000,
         .spi_mode = 0,
-        .trans_queue_depth = 10,
+        /* The original Cardputer uses a single persistent framebuffer. Keep the LCD queue shallow
+         * there so we do not render into memory that SPI DMA is still transmitting. */
+        .trans_queue_depth = M5APPLE2_LCD_TRANS_QUEUE_DEPTH,
         .lcd_cmd_bits = 8,
         .lcd_param_bits = 8,
     };

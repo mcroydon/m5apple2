@@ -25,6 +25,12 @@ static apple2_machine_t s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 
+#ifdef CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+#define APP_FRAME_INTERVAL_US 33333
+#else
+#define APP_FRAME_INTERVAL_US 16666
+#endif
+
 #ifdef M5APPLE2_HAS_APPLE2PLUS_ROM
 extern const uint8_t apple2plus_rom_start[] asm("_binary_apple2plus_rom_start");
 extern const uint8_t apple2plus_rom_end[] asm("_binary_apple2plus_rom_end");
@@ -1330,7 +1336,7 @@ void app_main(void)
         }
         last_cpu_tick_us = now_us;
 
-        if ((now_us - last_frame_tick_us) >= 16666) {
+        if ((now_us - last_frame_tick_us) >= APP_FRAME_INTERVAL_US) {
             if (s_machine.video.text_mode) {
                 ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
                                                                         s_machine.memory,
