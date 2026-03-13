@@ -33,5 +33,6 @@ typedef struct {
 uint16_t apple2_text_row_address(bool page2, uint8_t row);
 uint16_t apple2_hires_line_address(bool page2, uint8_t line);
 uint16_t apple2_palette_rgb565(uint8_t color_index);
+uint8_t apple2_text_code_to_ascii(uint8_t code, bool *inverse);
+const uint8_t *apple2_ascii_font(uint8_t ascii);
 void apple2_video_render(const uint8_t *memory, const apple2_video_state_t *state, uint8_t *pixels);
-

@@ -330,11 +330,17 @@ void app_main(void)
         last_cpu_tick_us = now_us;
 
         if ((now_us - last_frame_tick_us) >= 16666) {
-            apple2_machine_render(&s_machine, s_apple2_pixels);
-            ESP_ERROR_CHECK(cardputer_display_present_apple2(&s_display,
-                                                             s_apple2_pixels,
-                                                             APPLE2_VIDEO_WIDTH,
-                                                             APPLE2_VIDEO_HEIGHT));
+            if (s_machine.video.text_mode) {
+                ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
+                                                                        s_machine.memory,
+                                                                        &s_machine.video));
+            } else {
+                apple2_machine_render(&s_machine, s_apple2_pixels);
+                ESP_ERROR_CHECK(cardputer_display_present_apple2(&s_display,
+                                                                 s_apple2_pixels,
+                                                                 APPLE2_VIDEO_WIDTH,
+                                                                 APPLE2_VIDEO_HEIGHT));
+            }
             last_frame_tick_us = now_us;
         }
 

@@ -40,6 +40,31 @@ static spi_host_device_t cardputer_spi_host(void)
 }
 
 static const char *TAG = "cardputer_display";
+static uint16_t s_framebuffer[CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT];
+
+static void cardputer_display_clear(uint16_t color)
+{
+    for (uint32_t i = 0; i < (uint32_t)CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT; ++i) {
+        s_framebuffer[i] = color;
+    }
+}
+
+static bool cardputer_display_glyph_group_on(const uint8_t *glyph,
+                                             uint8_t src_x0,
+                                             uint8_t src_x1,
+                                             uint8_t src_y0,
+                                             uint8_t src_y1)
+{
+    for (uint8_t sy = src_y0; sy <= src_y1; ++sy) {
+        const uint8_t row_bits = glyph[sy];
+        for (uint8_t sx = src_x0; sx <= src_x1; ++sx) {
+            if ((row_bits & (uint8_t)(1U << (6U - sx))) != 0U) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
 
 esp_err_t cardputer_display_init(cardputer_display_t *display)
 {
@@ -126,12 +151,63 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
     return ESP_OK;
 }
 
+esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
+                                                  const uint8_t *memory,
+                                                  const apple2_video_state_t *state)
+{
+    static const uint8_t s_src_x0[5] = { 0U, 1U, 2U, 4U, 6U };
+    static const uint8_t s_src_x1[5] = { 0U, 1U, 3U, 5U, 6U };
+    static const uint8_t s_src_y0[5] = { 0U, 2U, 3U, 5U, 6U };
+    static const uint8_t s_src_y1[5] = { 1U, 2U, 4U, 5U, 7U };
+    const uint16_t dst_width = display->native_width;
+    const uint16_t dst_height = display->native_height;
+    const uint16_t fg = apple2_palette_rgb565(APPLE2_COLOR_WHITE);
+    const uint16_t bg = apple2_palette_rgb565(APPLE2_COLOR_BLACK);
+    const uint16_t origin_y = (uint16_t)((dst_height - 24U * 5U) / 2U);
+
+    cardputer_display_clear(bg);
+
+    for (uint8_t row = 0; row < 24U; ++row) {
+        const uint16_t row_address = apple2_text_row_address(state->page2, row);
+        const uint16_t dst_y = (uint16_t)(origin_y + row * 5U);
+
+        for (uint8_t column = 0; column < 40U; ++column) {
+            bool inverse = false;
+            const uint8_t code = memory[(uint16_t)(row_address + column)];
+            const bool flashing = ((code & 0xC0U) == 0x40U);
+            const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
+            const bool cell_inverse = inverse || (flashing && state->flash_state);
+            const uint16_t cell_bg = cell_inverse ? fg : bg;
+            const uint16_t cell_fg = cell_inverse ? bg : fg;
+            const uint16_t dst_x = (uint16_t)(column * 6U);
+            const uint8_t *glyph = apple2_ascii_font(ascii);
+
+            for (uint8_t ty = 0; ty < 5U; ++ty) {
+                const uint32_t base = (uint32_t)(dst_y + ty) * dst_width + dst_x;
+                for (uint8_t tx = 0; tx < 6U; ++tx) {
+                    s_framebuffer[base + tx] = cell_bg;
+                }
+                for (uint8_t tx = 0; tx < 5U; ++tx) {
+                    if (cardputer_display_glyph_group_on(glyph,
+                                                         s_src_x0[tx],
+                                                         s_src_x1[tx],
+                                                         s_src_y0[ty],
+                                                         s_src_y1[ty])) {
+                        s_framebuffer[base + tx] = cell_fg;
+                    }
+                }
+            }
+        }
+    }
+
+    return esp_lcd_panel_draw_bitmap(display->panel, 0, 0, dst_width, dst_height, s_framebuffer);
+}
+
 esp_err_t cardputer_display_present_apple2(cardputer_display_t *display,
                                            const uint8_t *pixels,
                                            uint16_t width,
                                            uint16_t height)
 {
-    static uint16_t s_framebuffer[CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT];
     const uint16_t dst_width = display->native_width;
     const uint16_t dst_height = display->native_height;
     uint16_t out_width = dst_width;
@@ -150,9 +226,7 @@ esp_err_t cardputer_display_present_apple2(cardputer_display_t *display,
         offset_y = (uint16_t)((dst_height - out_height) / 2U);
     }
 
-    for (uint32_t i = 0; i < (uint32_t)dst_width * dst_height; ++i) {
-        s_framebuffer[i] = apple2_palette_rgb565(APPLE2_COLOR_BLACK);
-    }
+    cardputer_display_clear(apple2_palette_rgb565(APPLE2_COLOR_BLACK));
 
     for (uint16_t y = 0; y < out_height; ++y) {
         const uint16_t src_y = (uint16_t)((uint32_t)y * height / out_height);

@@ -80,7 +80,7 @@ uint16_t apple2_palette_rgb565(uint8_t color_index)
     return s_palette_rgb565[color_index & 0x0FU];
 }
 
-static const uint8_t *apple2_font_for_ascii(uint8_t ascii)
+const uint8_t *apple2_ascii_font(uint8_t ascii)
 {
     if (ascii < 32U || ascii > 127U) {
         ascii = '?';
@@ -88,7 +88,7 @@ static const uint8_t *apple2_font_for_ascii(uint8_t ascii)
     return s_ascii_font[ascii - 32U];
 }
 
-static uint8_t apple2_text_ascii(uint8_t code, bool *inverse)
+uint8_t apple2_text_code_to_ascii(uint8_t code, bool *inverse)
 {
     uint8_t ascii;
 
@@ -117,8 +117,8 @@ static void apple2_render_text_row(const uint8_t *memory, const apple2_video_sta
         bool inverse = false;
         const uint8_t code = memory[(uint16_t)(row_address + column)];
         const bool flashing = ((code & 0xC0U) == 0x40U);
-        const uint8_t ascii = apple2_text_ascii(code, &inverse);
-        const uint8_t *glyph = apple2_font_for_ascii(ascii);
+        const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
+        const uint8_t *glyph = apple2_ascii_font(ascii);
         const bool cell_inverse = inverse || (flashing && state->flash_state);
         for (uint8_t py = 0; py < 8U; ++py) {
             const uint8_t row_bits = glyph[py];
