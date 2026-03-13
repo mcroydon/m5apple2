@@ -16,6 +16,7 @@ endchoice
 
 config M5APPLE2_LCD_HOST_ID
     int "LCD SPI host"
+    default 3 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default 2
 
 config M5APPLE2_LCD_WIDTH
@@ -36,6 +37,7 @@ config M5APPLE2_LCD_PIN_CLK
 
 config M5APPLE2_LCD_PIN_CS
     int "LCD CS pin"
+    default 37 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default 33
 
 config M5APPLE2_LCD_PIN_DC
@@ -44,6 +46,7 @@ config M5APPLE2_LCD_PIN_DC
 
 config M5APPLE2_LCD_PIN_RST
     int "LCD reset pin"
+    default 33 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default 37
 
 config M5APPLE2_LCD_PIN_BKLT
@@ -52,10 +55,12 @@ config M5APPLE2_LCD_PIN_BKLT
 
 config M5APPLE2_LCD_OFFSET_X
     int "LCD X offset"
+    default 52 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default 40
 
 config M5APPLE2_LCD_OFFSET_Y
     int "LCD Y offset"
+    default 40 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default 53
 
 config M5APPLE2_LCD_SWAP_XY
@@ -64,6 +69,7 @@ config M5APPLE2_LCD_SWAP_XY
 
 config M5APPLE2_LCD_MIRROR_X
     bool "Mirror LCD X"
+    default y if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default n
 
 config M5APPLE2_LCD_MIRROR_Y

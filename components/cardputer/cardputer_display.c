@@ -8,6 +8,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_vendor.h"
+#include "esp_log.h"
 
 #ifdef CONFIG_M5APPLE2_LCD_SWAP_XY
 #define M5APPLE2_LCD_SWAP_XY_VALUE true
@@ -38,12 +39,26 @@ static spi_host_device_t cardputer_spi_host(void)
     return CONFIG_M5APPLE2_LCD_HOST_ID == 3 ? SPI3_HOST : SPI2_HOST;
 }
 
+static const char *TAG = "cardputer_display";
+
 esp_err_t cardputer_display_init(cardputer_display_t *display)
 {
     static bool s_spi_initialized;
 
     display->native_width = CONFIG_M5APPLE2_LCD_WIDTH;
     display->native_height = CONFIG_M5APPLE2_LCD_HEIGHT;
+    ESP_LOGI(TAG,
+             "LCD cfg host=%d cs=%d dc=%d rst=%d bklt=%d gap=%d,%d swap=%d mirror=%d,%d",
+             CONFIG_M5APPLE2_LCD_HOST_ID,
+             CONFIG_M5APPLE2_LCD_PIN_CS,
+             CONFIG_M5APPLE2_LCD_PIN_DC,
+             CONFIG_M5APPLE2_LCD_PIN_RST,
+             CONFIG_M5APPLE2_LCD_PIN_BKLT,
+             CONFIG_M5APPLE2_LCD_OFFSET_X,
+             CONFIG_M5APPLE2_LCD_OFFSET_Y,
+             M5APPLE2_LCD_SWAP_XY_VALUE ? 1 : 0,
+             M5APPLE2_LCD_MIRROR_X_VALUE ? 1 : 0,
+             M5APPLE2_LCD_MIRROR_Y_VALUE ? 1 : 0);
 
     if (!s_spi_initialized) {
         const spi_bus_config_t bus_config = {
