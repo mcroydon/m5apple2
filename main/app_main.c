@@ -457,7 +457,10 @@ static bool app_sd_scan_directory(void)
     while ((entry = readdir(dir)) != NULL) {
         app_disk_image_type_t type;
         app_sd_disk_entry_t *disk;
+        FILE *candidate_file;
+        char candidate_path[APP_SD_PATH_MAX];
         size_t name_len;
+        size_t path_len;
 
         if (entry->d_name[0] == '.') {
             continue;
@@ -478,12 +481,27 @@ static bool app_sd_scan_directory(void)
             continue;
         }
 
-        disk = &s_sd_disks[s_sd_disk_count++];
-        memcpy(disk->path, APP_SD_MOUNT_POINT "/", sizeof(APP_SD_MOUNT_POINT));
-        memcpy(&disk->path[sizeof(APP_SD_MOUNT_POINT)],
+        memcpy(candidate_path, APP_SD_MOUNT_POINT "/", sizeof(APP_SD_MOUNT_POINT));
+        memcpy(&candidate_path[sizeof(APP_SD_MOUNT_POINT)],
                entry->d_name,
                name_len);
-        disk->path[sizeof(APP_SD_MOUNT_POINT) + name_len] = '\0';
+        candidate_path[sizeof(APP_SD_MOUNT_POINT) + name_len] = '\0';
+        path_len = sizeof(APP_SD_MOUNT_POINT) + name_len + 1U;
+
+        candidate_file = fopen(candidate_path, "rb");
+        if (candidate_file == NULL) {
+            ESP_LOGW(TAG, "Skipping unreadable SD disk candidate: %s", entry->d_name);
+            continue;
+        }
+        if (!app_sd_file_valid(candidate_file)) {
+            fclose(candidate_file);
+            ESP_LOGI(TAG, "Skipping non-140 KB SD disk candidate: %s", entry->d_name);
+            continue;
+        }
+        fclose(candidate_file);
+
+        disk = &s_sd_disks[s_sd_disk_count++];
+        memcpy(disk->path, candidate_path, path_len);
         memcpy(disk->name, entry->d_name, name_len);
         disk->name[name_len] = '\0';
         disk->type = type;
