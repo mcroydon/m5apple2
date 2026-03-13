@@ -47,6 +47,7 @@ extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
 #endif
 
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
+#define APP_SD_MOUNT_POINT "/apple2"
 
 typedef enum {
     APP_DISK_ORDER_DOS33 = 0,
@@ -429,14 +430,14 @@ static bool app_sd_mount_filesystem(void)
     slot_config.host_id = host_id;
     slot_config.gpio_cs = CONFIG_M5APPLE2_SD_PIN_CS;
 
-    err = esp_vfs_fat_sdspi_mount("/sd", &host, &slot_config, &mount_config, &s_sd_card);
+    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "SD mount failed: %s", esp_err_to_name(err));
         return false;
     }
 
     s_sd_mounted = true;
-    ESP_LOGI(TAG, "Mounted SD card at /sd");
+    ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
     return true;
 #endif
 }
@@ -447,9 +448,9 @@ static bool app_sd_scan_directory(void)
     struct dirent *entry;
 
     s_sd_disk_count = 0U;
-    dir = opendir("/sd");
+    dir = opendir(APP_SD_MOUNT_POINT);
     if (dir == NULL) {
-        ESP_LOGW(TAG, "Could not open /sd");
+        ESP_LOGW(TAG, "Could not open %s", APP_SD_MOUNT_POINT);
         return false;
     }
 
@@ -472,15 +473,17 @@ static bool app_sd_scan_directory(void)
         name_len = strnlen(entry->d_name, sizeof(disk->path));
         if (name_len == 0U ||
             name_len >= sizeof(disk->name) ||
-            (name_len + 4U) >= sizeof(disk->path)) {
+            (name_len + sizeof(APP_SD_MOUNT_POINT)) >= sizeof(disk->path)) {
             ESP_LOGW(TAG, "Skipping SD disk name that is too long: %s", entry->d_name);
             continue;
         }
 
         disk = &s_sd_disks[s_sd_disk_count++];
-        memcpy(disk->path, "/sd/", 4U);
-        memcpy(&disk->path[4], entry->d_name, name_len);
-        disk->path[4U + name_len] = '\0';
+        memcpy(disk->path, APP_SD_MOUNT_POINT "/", sizeof(APP_SD_MOUNT_POINT));
+        memcpy(&disk->path[sizeof(APP_SD_MOUNT_POINT)],
+               entry->d_name,
+               name_len);
+        disk->path[sizeof(APP_SD_MOUNT_POINT) + name_len] = '\0';
         memcpy(disk->name, entry->d_name, name_len);
         disk->name[name_len] = '\0';
         disk->type = type;
