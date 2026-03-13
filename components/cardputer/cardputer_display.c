@@ -66,6 +66,43 @@ static bool cardputer_display_glyph_group_on(const uint8_t *glyph,
     return false;
 }
 
+static bool cardputer_display_text_row_active(const uint8_t *memory,
+                                              const apple2_video_state_t *state,
+                                              uint8_t row)
+{
+    const uint16_t row_address = apple2_text_row_address(state->page2, row);
+
+    for (uint8_t column = 0; column < 40U; ++column) {
+        bool inverse = false;
+        const uint8_t code = memory[(uint16_t)(row_address + column)];
+        const bool flashing = ((code & 0xC0U) == 0x40U) && state->flash_state;
+        const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
+
+        if (ascii != ' ' || inverse || flashing) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool cardputer_display_text_row_focus(const uint8_t *memory,
+                                             const apple2_video_state_t *state,
+                                             uint8_t row)
+{
+    const uint16_t row_address = apple2_text_row_address(state->page2, row);
+
+    for (uint8_t column = 0; column < 40U; ++column) {
+        const uint8_t code = memory[(uint16_t)(row_address + column)];
+
+        if ((code & 0xC0U) == 0x40U) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 esp_err_t cardputer_display_init(cardputer_display_t *display)
 {
     static bool s_spi_initialized;
@@ -155,21 +192,78 @@ esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
                                                   const uint8_t *memory,
                                                   const apple2_video_state_t *state)
 {
-    static const uint8_t s_src_x0[5] = { 0U, 1U, 2U, 4U, 6U };
-    static const uint8_t s_src_x1[5] = { 0U, 1U, 3U, 5U, 6U };
-    static const uint8_t s_src_y0[5] = { 0U, 2U, 3U, 5U, 6U };
-    static const uint8_t s_src_y1[5] = { 1U, 2U, 4U, 5U, 7U };
     const uint16_t dst_width = display->native_width;
     const uint16_t dst_height = display->native_height;
     const uint16_t fg = apple2_palette_rgb565(APPLE2_COLOR_WHITE);
     const uint16_t bg = apple2_palette_rgb565(APPLE2_COLOR_BLACK);
-    const uint16_t origin_y = (uint16_t)((dst_height - 24U * 5U) / 2U);
+    uint8_t first_active = 24U;
+    uint8_t last_active = 0U;
+    uint8_t focus_row = 24U;
+    uint8_t first_row;
+    uint8_t last_row;
+    uint8_t active_rows;
+    uint8_t visible_rows;
+    uint8_t cell_height;
+    uint16_t origin_y;
 
     cardputer_display_clear(bg);
 
     for (uint8_t row = 0; row < 24U; ++row) {
+        if (!cardputer_display_text_row_active(memory, state, row)) {
+            continue;
+        }
+        if (first_active == 24U) {
+            first_active = row;
+        }
+        last_active = row;
+        if (cardputer_display_text_row_focus(memory, state, row)) {
+            focus_row = row;
+        }
+    }
+
+    if (first_active == 24U) {
+        first_active = 0U;
+        last_active = 0U;
+    }
+    if (focus_row == 24U) {
+        focus_row = last_active;
+    }
+
+    active_rows = (uint8_t)(last_active - first_active + 1U);
+    if (active_rows <= 16U) {
+        visible_rows = active_rows;
+        if (visible_rows < 12U) {
+            visible_rows = 12U;
+        }
+        cell_height = 8U;
+    } else if (active_rows <= 19U) {
+        visible_rows = active_rows;
+        if (visible_rows < 17U) {
+            visible_rows = 17U;
+        }
+        cell_height = 7U;
+    } else {
+        visible_rows = 22U;
+        cell_height = 6U;
+    }
+
+    if (focus_row + 1U > visible_rows) {
+        first_row = (uint8_t)(focus_row + 1U - visible_rows);
+    } else {
+        first_row = 0U;
+    }
+    if (first_row > (uint8_t)(24U - visible_rows)) {
+        first_row = (uint8_t)(24U - visible_rows);
+    }
+    if (active_rows <= visible_rows && first_active < first_row) {
+        first_row = first_active;
+    }
+    last_row = (uint8_t)(first_row + visible_rows - 1U);
+    origin_y = (uint16_t)((dst_height - visible_rows * cell_height) / 2U);
+
+    for (uint8_t row = first_row; row <= last_row; ++row) {
         const uint16_t row_address = apple2_text_row_address(state->page2, row);
-        const uint16_t dst_y = (uint16_t)(origin_y + row * 5U);
+        const uint16_t dst_y = (uint16_t)(origin_y + (row - first_row) * cell_height);
 
         for (uint8_t column = 0; column < 40U; ++column) {
             bool inverse = false;
@@ -182,17 +276,22 @@ esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
             const uint16_t dst_x = (uint16_t)(column * 6U);
             const uint8_t *glyph = apple2_ascii_font(ascii);
 
-            for (uint8_t ty = 0; ty < 5U; ++ty) {
+            for (uint8_t ty = 0; ty < cell_height; ++ty) {
                 const uint32_t base = (uint32_t)(dst_y + ty) * dst_width + dst_x;
                 for (uint8_t tx = 0; tx < 6U; ++tx) {
                     s_framebuffer[base + tx] = cell_bg;
                 }
-                for (uint8_t tx = 0; tx < 5U; ++tx) {
+                for (uint8_t tx = 0; tx < 6U; ++tx) {
+                    const uint8_t src_x0 = (uint8_t)((tx * 7U) / 6U);
+                    const uint8_t src_x1 = (uint8_t)((((tx + 1U) * 7U) - 1U) / 6U);
+                    const uint8_t src_y0 = (uint8_t)((ty * 8U) / cell_height);
+                    const uint8_t src_y1 = (uint8_t)((((ty + 1U) * 8U) - 1U) / cell_height);
+
                     if (cardputer_display_glyph_group_on(glyph,
-                                                         s_src_x0[tx],
-                                                         s_src_x1[tx],
-                                                         s_src_y0[ty],
-                                                         s_src_y1[ty])) {
+                                                         src_x0,
+                                                         src_x1,
+                                                         src_y0,
+                                                         src_y1)) {
                         s_framebuffer[base + tx] = cell_fg;
                     }
                 }
