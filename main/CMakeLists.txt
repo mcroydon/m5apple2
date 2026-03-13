@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS "app_main.c"
-    REQUIRES apple2 cardputer esp_timer
+    REQUIRES apple2 cardputer esp_timer fatfs sdmmc esp_driver_sdspi
 )
 
 set(M5APPLE2_GENERATED_ASSET_DIR "${CMAKE_CURRENT_SOURCE_DIR}/generated_assets")

@@ -35,15 +35,27 @@ Usage:
   The app prefers explicit `.do`, then `.po`, then `.dsk`.
   Ambiguous `.dsk` images are probed at startup and loaded as DOS-order or
   ProDOS-order based on which boot path looks more plausible.
+- Optionally place additional `140 KB` `.do`, `.po`, or `.dsk` images in the
+  root of a FAT-formatted SD card.
+  On startup, the app mounts `/sd`, scans for disk images, and auto-inserts:
+  the first SD image into drive 2 when an embedded boot disk is present, or
+  the first two SD images into drives 1 and 2 when no embedded disk is built in.
+- On-device SD hotkeys:
+  `Fn+1` cycles drive 1,
+  `Fn+2` cycles drive 2,
+  `Fn+0` rescans the SD card.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
 Current limitations:
 
-- Disk II support is currently read-only and only exposes drive 1.
+- Disk II support is currently read-only.
 - The Cardputer app now accepts explicit DOS-order `.do` and ProDOS-order `.po`
   images, and probes ambiguous `.dsk` images when the system and Disk II ROMs
   are available.
+- SD-backed disk mounting uses configurable SDSPI pins in `menuconfig`.
+  The default pin set is intended for Cardputer-class hardware but still needs
+  hardware validation.
 - DOS 3.3 now reaches the `]` prompt on the explicit ProDOS-order `.po` path
   and on ambiguous `.dsk` images that probe to that same layout.
 - The host-side ROM smoke also verifies prompt-side Apple II keyboard input by

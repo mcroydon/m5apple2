@@ -1,4 +1,5 @@
 #include "cardputer/cardputer_keymap.h"
+#include "cardputer/cardputer_input.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -99,12 +100,33 @@ static void test_modifiers_do_not_emit_ascii(void)
                                              &ascii));
 }
 
+static void test_fn_disk_commands(void)
+{
+    uint8_t ascii = 0;
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 1),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 1U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_DRIVE1);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 2),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 2U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_DRIVE2);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 10),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 10U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_RESCAN);
+}
+
 int main(void)
 {
     test_original_decode();
     test_adv_decode();
     test_ascii_translation();
     test_modifiers_do_not_emit_ascii();
+    test_fn_disk_commands();
     puts("cardputer keymap tests passed");
     return 0;
 }

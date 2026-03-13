@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
+#include "cardputer/cardputer_input.h"
 
 esp_err_t cardputer_keyboard_init(void);
 bool cardputer_keyboard_poll_ascii(uint8_t *ascii);

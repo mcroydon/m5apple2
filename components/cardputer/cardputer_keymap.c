@@ -1,4 +1,5 @@
 #include "cardputer/cardputer_keymap.h"
+#include "cardputer/cardputer_input.h"
 
 typedef enum {
     CARDPUTER_KEY_KIND_NONE = 0,
@@ -187,6 +188,7 @@ bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
     uint8_t value = 0;
     bool shift = false;
     bool ctrl = false;
+    bool fn = false;
 
     if (ascii == 0 || key == 0) {
         return false;
@@ -196,10 +198,27 @@ bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
                                              (cardputer_keycoord_t){ .row = 2U, .column = 1U });
     ctrl = cardputer_keymap_modifier_active(pressed_mask,
                                             (cardputer_keycoord_t){ .row = 3U, .column = 0U });
+    fn = cardputer_keymap_modifier_active(pressed_mask,
+                                          (cardputer_keycoord_t){ .row = 2U, .column = 0U });
 
     switch (key->kind) {
     case CARDPUTER_KEY_KIND_CHAR:
         value = shift ? key->shifted : key->normal;
+        if (fn) {
+            switch (value) {
+            case '0':
+                *ascii = CARDPUTER_INPUT_CMD_SD_RESCAN;
+                return true;
+            case '1':
+                *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE1;
+                return true;
+            case '2':
+                *ascii = CARDPUTER_INPUT_CMD_SD_DRIVE2;
+                return true;
+            default:
+                break;
+            }
+        }
         if (ctrl) {
             if (value >= 'a' && value <= 'z') {
                 value = (uint8_t)(value - 'a' + 'A');

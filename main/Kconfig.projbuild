@@ -90,4 +90,33 @@ config M5APPLE2_CPU_HZ
     int "Apple II master CPU clock"
     default 1020484
 
+config M5APPLE2_SD_ENABLE
+    bool "Enable SD disk library"
+    default y
+
+config M5APPLE2_SD_HOST_ID
+    int "SD SPI host"
+    depends on M5APPLE2_SD_ENABLE
+    default 2
+
+config M5APPLE2_SD_PIN_MOSI
+    int "SD MOSI pin"
+    depends on M5APPLE2_SD_ENABLE
+    default 14
+
+config M5APPLE2_SD_PIN_MISO
+    int "SD MISO pin"
+    depends on M5APPLE2_SD_ENABLE
+    default 39
+
+config M5APPLE2_SD_PIN_CLK
+    int "SD clock pin"
+    depends on M5APPLE2_SD_ENABLE
+    default 40
+
+config M5APPLE2_SD_PIN_CS
+    int "SD chip-select pin"
+    depends on M5APPLE2_SD_ENABLE
+    default 12
+
 endmenu
