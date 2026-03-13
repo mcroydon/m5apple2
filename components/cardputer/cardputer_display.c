@@ -48,7 +48,7 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
     display->native_width = CONFIG_M5APPLE2_LCD_WIDTH;
     display->native_height = CONFIG_M5APPLE2_LCD_HEIGHT;
     ESP_LOGI(TAG,
-             "LCD cfg host=%d cs=%d dc=%d rst=%d bklt=%d gap=%d,%d swap=%d mirror=%d,%d",
+             "LCD cfg host=%d cs=%d dc=%d rst=%d bklt=%d gap=%d,%d swap=%d mirror=%d,%d aspect=%d",
              CONFIG_M5APPLE2_LCD_HOST_ID,
              CONFIG_M5APPLE2_LCD_PIN_CS,
              CONFIG_M5APPLE2_LCD_PIN_DC,
@@ -58,7 +58,8 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
              CONFIG_M5APPLE2_LCD_OFFSET_Y,
              M5APPLE2_LCD_SWAP_XY_VALUE ? 1 : 0,
              M5APPLE2_LCD_MIRROR_X_VALUE ? 1 : 0,
-             M5APPLE2_LCD_MIRROR_Y_VALUE ? 1 : 0);
+             M5APPLE2_LCD_MIRROR_Y_VALUE ? 1 : 0,
+             M5APPLE2_LCD_PRESERVE_ASPECT_VALUE ? 1 : 0);
 
     if (!s_spi_initialized) {
         const spi_bus_config_t bus_config = {

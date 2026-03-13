@@ -79,6 +79,7 @@ config M5APPLE2_LCD_MIRROR_Y
 
 config M5APPLE2_LCD_PRESERVE_ASPECT
     bool "Preserve Apple II aspect ratio"
+    default n if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
     default y
 
 config M5APPLE2_INPUT_USE_UART
