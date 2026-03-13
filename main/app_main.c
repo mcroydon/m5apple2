@@ -45,6 +45,14 @@ extern const uint8_t dos_3_3_po_end[] asm("_binary_dos_3_3_po_end");
 extern const uint8_t dos_3_3_dsk_start[] asm("_binary_dos_3_3_dsk_start");
 extern const uint8_t dos_3_3_dsk_end[] asm("_binary_dos_3_3_dsk_end");
 #endif
+#ifdef M5APPLE2_HAS_DOS33_NIB
+extern const uint8_t dos_3_3_nib_start[] asm("_binary_dos_3_3_nib_start");
+extern const uint8_t dos_3_3_nib_end[] asm("_binary_dos_3_3_nib_end");
+#endif
+#ifdef M5APPLE2_HAS_DOS33_WOZ
+extern const uint8_t dos_3_3_woz_start[] asm("_binary_dos_3_3_woz_start");
+extern const uint8_t dos_3_3_woz_end[] asm("_binary_dos_3_3_woz_end");
+#endif
 
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
 #define APP_SD_MOUNT_POINT "/sd"
@@ -59,15 +67,24 @@ typedef enum {
     APP_DISK_IMAGE_DO,
     APP_DISK_IMAGE_PO,
     APP_DISK_IMAGE_DSK,
+    APP_DISK_IMAGE_NIB,
+    APP_DISK_IMAGE_WOZ,
 } app_disk_image_type_t;
 
 typedef struct {
     bool present;
+    app_disk_image_type_t type;
     const uint8_t *image;
     size_t image_size;
     apple2_disk2_image_order_t image_order;
     char label[24];
 } app_builtin_drive_t;
+
+typedef struct {
+    const uint8_t *image;
+    size_t image_size;
+    apple2_woz_image_t woz;
+} app_builtin_woz_drive_t;
 
 typedef enum {
     APP_DISK_SOURCE_MEMORY = 0,
@@ -94,9 +111,12 @@ typedef struct {
 
 typedef struct {
     FILE *file;
+    app_disk_image_type_t type;
+    apple2_woz_image_t *woz;
 } app_sd_drive_file_t;
 
 static app_builtin_drive_t s_builtin_drives[2];
+static app_builtin_woz_drive_t *s_builtin_woz_drives[2];
 static app_sd_disk_entry_t s_sd_disks[APP_SD_MAX_IMAGES];
 static app_sd_drive_file_t s_sd_drive_files[2];
 static sdmmc_card_t *s_sd_card;
@@ -271,20 +291,88 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
     app_puts_at(20, 2, "ESC RESETS THE EMULATOR");
 }
 
+static bool app_builtin_woz_read_track(void *context,
+                                       unsigned drive_index,
+                                       uint8_t quarter_track,
+                                       uint8_t *track_data,
+                                       uint16_t *track_length)
+{
+    const app_builtin_woz_drive_t *drive = context;
+    const uint8_t *source = NULL;
+
+    (void)drive_index;
+    if (drive == NULL || track_data == NULL || track_length == NULL) {
+        return false;
+    }
+    if (!apple2_woz_get_track(&drive->woz,
+                              drive->image,
+                              drive->image_size,
+                              quarter_track,
+                              &source,
+                              track_length)) {
+        return false;
+    }
+
+    memcpy(track_data, source, *track_length);
+    return true;
+}
+
+static bool app_load_memory_woz_drive(unsigned drive_index, const uint8_t *image, size_t image_size)
+{
+    app_builtin_woz_drive_t *drive;
+
+    if (drive_index >= 2U) {
+        return false;
+    }
+    if (s_builtin_woz_drives[drive_index] == NULL) {
+        s_builtin_woz_drives[drive_index] = calloc(1U, sizeof(*s_builtin_woz_drives[drive_index]));
+        if (s_builtin_woz_drives[drive_index] == NULL) {
+            return false;
+        }
+    }
+
+    drive = s_builtin_woz_drives[drive_index];
+    if (!apple2_woz_parse(&drive->woz, image, image_size)) {
+        return false;
+    }
+
+    drive->image = image;
+    drive->image_size = image_size;
+    return apple2_disk2_attach_drive_track_reader(&s_machine.disk2,
+                                                  drive_index,
+                                                  app_builtin_woz_read_track,
+                                                  drive);
+}
+
 static bool app_load_memory_drive(unsigned drive_index,
+                                  app_disk_image_type_t type,
                                   const uint8_t *image,
                                   size_t image_size,
                                   apple2_disk2_image_order_t image_order)
 {
-    return apple2_disk2_load_drive_with_order(&s_machine.disk2,
-                                              drive_index,
-                                              image,
-                                              image_size,
-                                              image_order);
+    switch (type) {
+    case APP_DISK_IMAGE_DO:
+    case APP_DISK_IMAGE_PO:
+    case APP_DISK_IMAGE_DSK:
+        return apple2_disk2_load_drive_with_order(&s_machine.disk2,
+                                                  drive_index,
+                                                  image,
+                                                  image_size,
+                                                  image_order);
+    case APP_DISK_IMAGE_NIB:
+        return apple2_disk2_load_nib_drive(&s_machine.disk2, drive_index, image, image_size);
+    case APP_DISK_IMAGE_WOZ:
+        return app_load_memory_woz_drive(drive_index, image, image_size);
+    case APP_DISK_IMAGE_NONE:
+    default:
+        return false;
+    }
 }
 
-#if defined(M5APPLE2_HAS_DOS33_DO) || defined(M5APPLE2_HAS_DOS33_PO) || defined(M5APPLE2_HAS_DOS33_DSK)
+#if defined(M5APPLE2_HAS_DOS33_DO) || defined(M5APPLE2_HAS_DOS33_PO) || defined(M5APPLE2_HAS_DOS33_DSK) || \
+    defined(M5APPLE2_HAS_DOS33_NIB) || defined(M5APPLE2_HAS_DOS33_WOZ)
 static void app_set_builtin_drive(unsigned drive_index,
+                                  app_disk_image_type_t type,
                                   const uint8_t *image,
                                   size_t image_size,
                                   apple2_disk2_image_order_t image_order,
@@ -295,6 +383,7 @@ static void app_set_builtin_drive(unsigned drive_index,
     }
 
     s_builtin_drives[drive_index].present = true;
+    s_builtin_drives[drive_index].type = type;
     s_builtin_drives[drive_index].image = image;
     s_builtin_drives[drive_index].image_size = image_size;
     s_builtin_drives[drive_index].image_order = image_order;
@@ -319,7 +408,11 @@ static bool app_restore_builtin_drive(unsigned drive_index)
         return false;
     }
 
-    return app_load_memory_drive(drive_index, drive->image, drive->image_size, drive->image_order);
+    return app_load_memory_drive(drive_index,
+                                 drive->type,
+                                 drive->image,
+                                 drive->image_size,
+                                 drive->image_order);
 }
 
 static app_disk_image_type_t app_disk_image_type_from_path(const char *path)
@@ -338,7 +431,199 @@ static app_disk_image_type_t app_disk_image_type_from_path(const char *path)
     if (strcasecmp(extension, ".dsk") == 0) {
         return APP_DISK_IMAGE_DSK;
     }
+    if (strcasecmp(extension, ".nib") == 0) {
+        return APP_DISK_IMAGE_NIB;
+    }
+    if (strcasecmp(extension, ".woz") == 0) {
+        return APP_DISK_IMAGE_WOZ;
+    }
     return APP_DISK_IMAGE_NONE;
+}
+
+static long app_file_size(FILE *file)
+{
+    long size;
+
+    if (file == NULL) {
+        return -1L;
+    }
+    if (fseek(file, 0L, SEEK_END) != 0) {
+        return -1L;
+    }
+    size = ftell(file);
+    if (size < 0L) {
+        return -1L;
+    }
+    rewind(file);
+    return size;
+}
+
+static bool app_read_exact(FILE *file, void *buffer, size_t size)
+{
+    return file != NULL && buffer != NULL && fread(buffer, 1, size, file) == size;
+}
+
+static bool app_sd_parse_woz_file(FILE *file, apple2_woz_image_t *woz)
+{
+    uint8_t file_header[12];
+    long file_size;
+    bool is_woz1;
+    long chunk_offset = 12L;
+    bool have_info = false;
+    bool have_tmap = false;
+    bool have_trks = false;
+
+    if (file == NULL || woz == NULL) {
+        return false;
+    }
+
+    memset(woz, 0, sizeof(*woz));
+    memset(woz->tmap, 0xFF, sizeof(woz->tmap));
+
+    file_size = app_file_size(file);
+    if (file_size < 12L || !app_read_exact(file, file_header, sizeof(file_header))) {
+        return false;
+    }
+
+    is_woz1 = memcmp(file_header, "WOZ1", 4) == 0;
+    woz->is_woz2 = memcmp(file_header, "WOZ2", 4) == 0;
+    if ((!is_woz1 && !woz->is_woz2) ||
+        file_header[4] != 0xFFU ||
+        file_header[5] != 0x0AU ||
+        file_header[6] != 0x0DU ||
+        file_header[7] != 0x0AU) {
+        return false;
+    }
+
+    while ((chunk_offset + 8L) <= file_size) {
+        uint8_t chunk_header[8];
+        uint32_t chunk_size;
+        const long chunk_data_offset = chunk_offset + 8L;
+
+        if (fseek(file, chunk_offset, SEEK_SET) != 0 || !app_read_exact(file, chunk_header, sizeof(chunk_header))) {
+            return false;
+        }
+        chunk_size = ((uint32_t)chunk_header[4]) |
+                     ((uint32_t)chunk_header[5] << 8) |
+                     ((uint32_t)chunk_header[6] << 16) |
+                     ((uint32_t)chunk_header[7] << 24);
+        if (chunk_size > (uint32_t)(file_size - chunk_data_offset)) {
+            return false;
+        }
+
+        if (memcmp(chunk_header, "INFO", 4) == 0) {
+            uint8_t info_header[2];
+
+            if (chunk_size < sizeof(info_header) ||
+                fseek(file, chunk_data_offset, SEEK_SET) != 0 ||
+                !app_read_exact(file, info_header, sizeof(info_header))) {
+                return false;
+            }
+            have_info = info_header[1] == 1U;
+        } else if (memcmp(chunk_header, "TMAP", 4) == 0) {
+            if (chunk_size < APPLE2_DISK2_WOZ_TMAP_ENTRIES ||
+                fseek(file, chunk_data_offset, SEEK_SET) != 0 ||
+                !app_read_exact(file, woz->tmap, APPLE2_DISK2_WOZ_TMAP_ENTRIES)) {
+                return false;
+            }
+            have_tmap = true;
+        } else if (memcmp(chunk_header, "TRKS", 4) == 0) {
+            if (is_woz1) {
+                const size_t track_count = (size_t)chunk_size / 6656U;
+
+                if (chunk_size == 0U || (chunk_size % 6656U) != 0U) {
+                    return false;
+                }
+                for (size_t track_index = 0;
+                     track_index < track_count && track_index < APPLE2_DISK2_WOZ_TMAP_ENTRIES;
+                     ++track_index) {
+                    const long track_offset = chunk_data_offset + (long)(track_index * 6656U);
+                    uint8_t track_meta[4];
+                    uint16_t byte_count;
+                    uint32_t bit_count;
+
+                    if (fseek(file, track_offset + 6646L, SEEK_SET) != 0 ||
+                        !app_read_exact(file, track_meta, sizeof(track_meta))) {
+                        return false;
+                    }
+                    byte_count = (uint16_t)track_meta[0] | (uint16_t)((uint16_t)track_meta[1] << 8);
+                    bit_count = (uint32_t)track_meta[2] | ((uint32_t)track_meta[3] << 8);
+                    if (byte_count == 0U && bit_count != 0U) {
+                        byte_count = (uint16_t)((bit_count + 7U) / 8U);
+                    }
+                    if (byte_count == 0U) {
+                        continue;
+                    }
+                    if (byte_count > 6646U || byte_count > APPLE2_DISK2_MAX_TRACK_BYTES) {
+                        return false;
+                    }
+
+                    woz->tracks[track_index].offset = (uint32_t)track_offset;
+                    woz->tracks[track_index].byte_count = byte_count;
+                }
+            } else {
+                if (chunk_size < (APPLE2_DISK2_WOZ_TMAP_ENTRIES * 8U)) {
+                    return false;
+                }
+                for (size_t track_index = 0; track_index < APPLE2_DISK2_WOZ_TMAP_ENTRIES; ++track_index) {
+                    uint8_t track_entry[8];
+                    uint16_t start_block;
+                    uint16_t block_count;
+                    uint32_t bit_count;
+                    uint16_t byte_count;
+                    uint32_t track_offset;
+
+                    if (fseek(file, chunk_data_offset + (long)(track_index * 8U), SEEK_SET) != 0 ||
+                        !app_read_exact(file, track_entry, sizeof(track_entry))) {
+                        return false;
+                    }
+                    start_block = (uint16_t)track_entry[0] | (uint16_t)((uint16_t)track_entry[1] << 8);
+                    block_count = (uint16_t)track_entry[2] | (uint16_t)((uint16_t)track_entry[3] << 8);
+                    bit_count = ((uint32_t)track_entry[4]) |
+                                ((uint32_t)track_entry[5] << 8) |
+                                ((uint32_t)track_entry[6] << 16) |
+                                ((uint32_t)track_entry[7] << 24);
+                    if (start_block == 0U || block_count == 0U || bit_count == 0U) {
+                        continue;
+                    }
+
+                    byte_count = (uint16_t)((bit_count + 7U) / 8U);
+                    track_offset = (uint32_t)start_block * 512U;
+                    if (byte_count > (uint32_t)block_count * 512U ||
+                        byte_count > APPLE2_DISK2_MAX_TRACK_BYTES ||
+                        track_offset > (uint32_t)file_size ||
+                        byte_count > (uint32_t)file_size - track_offset) {
+                        return false;
+                    }
+
+                    woz->tracks[track_index].offset = track_offset;
+                    woz->tracks[track_index].byte_count = byte_count;
+                }
+            }
+            have_trks = true;
+        }
+
+        chunk_offset = chunk_data_offset + (long)chunk_size;
+    }
+
+    if (!have_info || !have_tmap || !have_trks) {
+        return false;
+    }
+    for (size_t i = 0; i < APPLE2_DISK2_WOZ_TMAP_ENTRIES; ++i) {
+        const uint8_t track_index = woz->tmap[i];
+
+        if (track_index == 0xFFU) {
+            continue;
+        }
+        if (track_index >= APPLE2_DISK2_WOZ_TMAP_ENTRIES ||
+            woz->tracks[track_index].byte_count == 0U) {
+            return false;
+        }
+    }
+
+    rewind(file);
+    woz->valid = true;
+    return true;
 }
 
 static bool app_sd_read_sector(void *context,
@@ -360,22 +645,86 @@ static bool app_sd_read_sector(void *context,
     return fread(sector_data, 1, 256U, drive->file) == 256U;
 }
 
-static bool app_sd_file_valid(FILE *file)
+static bool app_sd_read_track(void *context,
+                              unsigned drive_index,
+                              uint8_t quarter_track,
+                              uint8_t *track_data,
+                              uint16_t *track_length)
 {
-    long size;
+    app_sd_drive_file_t *drive = context;
+    long offset;
+    size_t length;
 
-    if (file == NULL) {
+    (void)drive_index;
+    if (drive == NULL || drive->file == NULL || track_data == NULL || track_length == NULL) {
         return false;
     }
-    if (fseek(file, 0L, SEEK_END) != 0) {
+
+    switch (drive->type) {
+    case APP_DISK_IMAGE_NIB:
+        offset = (long)(((size_t)(quarter_track / 4U)) * APPLE2_DISK2_NIB_TRACK_BYTES);
+        length = APPLE2_DISK2_NIB_TRACK_BYTES;
+        break;
+
+    case APP_DISK_IMAGE_WOZ: {
+        const uint8_t track_index =
+            (drive->woz != NULL && quarter_track < APPLE2_DISK2_WOZ_TMAP_ENTRIES)
+                ? drive->woz->tmap[quarter_track]
+                : 0xFFU;
+
+        if (track_index == 0xFFU ||
+            track_index >= APPLE2_DISK2_WOZ_TMAP_ENTRIES ||
+            drive->woz == NULL ||
+            drive->woz->tracks[track_index].byte_count == 0U) {
+            return false;
+        }
+        offset = (long)drive->woz->tracks[track_index].offset;
+        length = drive->woz->tracks[track_index].byte_count;
+        break;
+    }
+
+    default:
         return false;
     }
-    size = ftell(file);
+
+    if (length == 0U || length > APPLE2_DISK2_MAX_TRACK_BYTES) {
+        return false;
+    }
+    if (fseek(drive->file, offset, SEEK_SET) != 0) {
+        return false;
+    }
+    if (fread(track_data, 1, length, drive->file) != length) {
+        return false;
+    }
+
+    *track_length = (uint16_t)length;
+    return true;
+}
+
+static bool app_sd_file_valid(FILE *file, app_disk_image_type_t type, apple2_woz_image_t *woz)
+{
+    const long size = app_file_size(file);
+
     if (size < 0L) {
         return false;
     }
-    rewind(file);
-    return (size_t)size == APPLE2_DISK2_IMAGE_SIZE;
+
+    switch (type) {
+    case APP_DISK_IMAGE_DO:
+    case APP_DISK_IMAGE_PO:
+    case APP_DISK_IMAGE_DSK:
+        return (size_t)size == APPLE2_DISK2_IMAGE_SIZE;
+    case APP_DISK_IMAGE_NIB:
+        return (size_t)size == APPLE2_DISK2_NIB_IMAGE_SIZE;
+    case APP_DISK_IMAGE_WOZ: {
+        apple2_woz_image_t parsed;
+
+        return app_sd_parse_woz_file(file, (woz != NULL) ? woz : &parsed);
+    }
+    case APP_DISK_IMAGE_NONE:
+    default:
+        return false;
+    }
 }
 
 static void app_sd_close_drive(unsigned drive_index)
@@ -387,6 +736,9 @@ static void app_sd_close_drive(unsigned drive_index)
         fclose(s_sd_drive_files[drive_index].file);
         s_sd_drive_files[drive_index].file = NULL;
     }
+    s_sd_drive_files[drive_index].type = APP_DISK_IMAGE_NONE;
+    free(s_sd_drive_files[drive_index].woz);
+    s_sd_drive_files[drive_index].woz = NULL;
 }
 
 static int app_sd_disk_compare(const void *lhs, const void *rhs)
@@ -497,9 +849,9 @@ static bool app_sd_scan_directory(void)
             ESP_LOGW(TAG, "Skipping unreadable SD disk candidate: %s", entry->d_name);
             continue;
         }
-        if (!app_sd_file_valid(candidate_file)) {
+        if (!app_sd_file_valid(candidate_file, type, NULL)) {
             fclose(candidate_file);
-            ESP_LOGI(TAG, "Skipping non-140 KB SD disk candidate: %s", entry->d_name);
+            ESP_LOGI(TAG, "Skipping unsupported SD disk candidate: %s", entry->d_name);
             continue;
         }
         fclose(candidate_file);
@@ -532,7 +884,7 @@ static bool app_sd_probe_file_order(const char *path)
     if (probe.file == NULL) {
         return false;
     }
-    if (!app_sd_file_valid(probe.file)) {
+    if (!app_sd_file_valid(probe.file, APP_DISK_IMAGE_DSK, NULL)) {
         fclose(probe.file);
         return false;
     }
@@ -546,7 +898,8 @@ static bool app_sd_probe_file_order(const char *path)
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
 {
     const app_sd_disk_entry_t *disk;
-    apple2_disk2_image_order_t image_order;
+    apple2_disk2_image_order_t image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+    bool attached = false;
 
     if (drive_index >= 2U || disk_index >= s_sd_disk_count) {
         return false;
@@ -559,8 +912,19 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
         ESP_LOGW(TAG, "Failed to open SD disk %s", disk->name);
         return false;
     }
-    if (!app_sd_file_valid(s_sd_drive_files[drive_index].file)) {
-        ESP_LOGW(TAG, "SD disk %s is not a 140 KB image", disk->name);
+    s_sd_drive_files[drive_index].type = disk->type;
+    if (disk->type == APP_DISK_IMAGE_WOZ && s_sd_drive_files[drive_index].woz == NULL) {
+        s_sd_drive_files[drive_index].woz = calloc(1U, sizeof(*s_sd_drive_files[drive_index].woz));
+        if (s_sd_drive_files[drive_index].woz == NULL) {
+            app_sd_close_drive(drive_index);
+            ESP_LOGW(TAG, "Failed to allocate WOZ metadata for %s", disk->name);
+            return false;
+        }
+    }
+    if (!app_sd_file_valid(s_sd_drive_files[drive_index].file,
+                           disk->type,
+                           s_sd_drive_files[drive_index].woz)) {
+        ESP_LOGW(TAG, "SD disk %s is not a supported image", disk->name);
         app_sd_close_drive(drive_index);
         return false;
     }
@@ -568,35 +932,70 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     switch (disk->type) {
     case APP_DISK_IMAGE_PO:
         image_order = APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL;
+        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
+                                                    drive_index,
+                                                    app_sd_read_sector,
+                                                    &s_sd_drive_files[drive_index],
+                                                    APPLE2_DISK2_IMAGE_SIZE,
+                                                    image_order);
         break;
     case APP_DISK_IMAGE_DSK:
         image_order = app_sd_probe_file_order(disk->path)
                           ? APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL
                           : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
+                                                    drive_index,
+                                                    app_sd_read_sector,
+                                                    &s_sd_drive_files[drive_index],
+                                                    APPLE2_DISK2_IMAGE_SIZE,
+                                                    image_order);
+        break;
+    case APP_DISK_IMAGE_NIB:
+    case APP_DISK_IMAGE_WOZ:
+        attached = apple2_disk2_attach_drive_track_reader(&s_machine.disk2,
+                                                          drive_index,
+                                                          app_sd_read_track,
+                                                          &s_sd_drive_files[drive_index]);
         break;
     case APP_DISK_IMAGE_DO:
     default:
         image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
+                                                    drive_index,
+                                                    app_sd_read_sector,
+                                                    &s_sd_drive_files[drive_index],
+                                                    APPLE2_DISK2_IMAGE_SIZE,
+                                                    image_order);
         break;
     }
 
-    if (!apple2_disk2_attach_drive_reader(&s_machine.disk2,
-                                          drive_index,
-                                          app_sd_read_sector,
-                                          &s_sd_drive_files[drive_index],
-                                          APPLE2_DISK2_IMAGE_SIZE,
-                                          image_order)) {
+    if (!attached) {
         app_sd_close_drive(drive_index);
         ESP_LOGW(TAG, "Failed to attach SD disk %s", disk->name);
         return false;
     }
 
     s_sd_drive_index[drive_index] = (int)disk_index;
-    ESP_LOGI(TAG,
-             "Mounted SD disk %s in drive %u (%s order)",
-             disk->name,
-             (unsigned)(drive_index + 1U),
-             (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS");
+    switch (disk->type) {
+    case APP_DISK_IMAGE_PO:
+    case APP_DISK_IMAGE_DSK:
+    case APP_DISK_IMAGE_DO:
+        ESP_LOGI(TAG,
+                 "Mounted SD disk %s in drive %u (%s order)",
+                 disk->name,
+                 (unsigned)(drive_index + 1U),
+                 (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS");
+        break;
+    case APP_DISK_IMAGE_NIB:
+        ESP_LOGI(TAG, "Mounted SD disk %s in drive %u (NIB)", disk->name, (unsigned)(drive_index + 1U));
+        break;
+    case APP_DISK_IMAGE_WOZ:
+        ESP_LOGI(TAG, "Mounted SD disk %s in drive %u (WOZ)", disk->name, (unsigned)(drive_index + 1U));
+        break;
+    case APP_DISK_IMAGE_NONE:
+    default:
+        break;
+    }
     return true;
 }
 
@@ -727,10 +1126,55 @@ static bool app_load_slot6_rom(void)
 
 static bool app_load_drive0_image(void)
 {
+#ifdef M5APPLE2_HAS_DOS33_WOZ
+    {
+        const size_t image_size = (size_t)(dos_3_3_woz_end - dos_3_3_woz_start);
+
+        if (!app_load_memory_drive(0U,
+                                   APP_DISK_IMAGE_WOZ,
+                                   dos_3_3_woz_start,
+                                   image_size,
+                                   APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)) {
+            ESP_LOGE(TAG, "Embedded .woz disk rejected, size=%u", (unsigned)image_size);
+            return false;
+        }
+        ESP_LOGI(TAG, "Loaded embedded .woz disk (%u bytes)", (unsigned)image_size);
+        app_set_builtin_drive(0U,
+                              APP_DISK_IMAGE_WOZ,
+                              dos_3_3_woz_start,
+                              image_size,
+                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL,
+                              "dos_3.3.woz");
+        return true;
+    }
+#endif
+#ifdef M5APPLE2_HAS_DOS33_NIB
+    {
+        const size_t image_size = (size_t)(dos_3_3_nib_end - dos_3_3_nib_start);
+
+        if (!app_load_memory_drive(0U,
+                                   APP_DISK_IMAGE_NIB,
+                                   dos_3_3_nib_start,
+                                   image_size,
+                                   APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)) {
+            ESP_LOGE(TAG, "Embedded .nib disk rejected, size=%u", (unsigned)image_size);
+            return false;
+        }
+        ESP_LOGI(TAG, "Loaded embedded .nib disk (%u bytes)", (unsigned)image_size);
+        app_set_builtin_drive(0U,
+                              APP_DISK_IMAGE_NIB,
+                              dos_3_3_nib_start,
+                              image_size,
+                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL,
+                              "dos_3.3.nib");
+        return true;
+    }
+#endif
 #ifdef M5APPLE2_HAS_DOS33_DO
     {
         const size_t image_size = (size_t)(dos_3_3_do_end - dos_3_3_do_start);
         if (!app_load_memory_drive(0U,
+                                   APP_DISK_IMAGE_DO,
                                    dos_3_3_do_start,
                                    image_size,
                                    APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)) {
@@ -739,6 +1183,7 @@ static bool app_load_drive0_image(void)
         }
         ESP_LOGI(TAG, "Loaded embedded DOS-order disk (%u bytes)", (unsigned)image_size);
         app_set_builtin_drive(0U,
+                              APP_DISK_IMAGE_DO,
                               dos_3_3_do_start,
                               image_size,
                               APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL,
@@ -750,6 +1195,7 @@ static bool app_load_drive0_image(void)
     {
         const size_t image_size = (size_t)(dos_3_3_po_end - dos_3_3_po_start);
         if (!app_load_memory_drive(0U,
+                                   APP_DISK_IMAGE_PO,
                                    dos_3_3_po_start,
                                    image_size,
                                    APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL)) {
@@ -758,6 +1204,7 @@ static bool app_load_drive0_image(void)
         }
         ESP_LOGI(TAG, "Loaded embedded ProDOS-order disk (%u bytes)", (unsigned)image_size);
         app_set_builtin_drive(0U,
+                              APP_DISK_IMAGE_PO,
                               dos_3_3_po_start,
                               image_size,
                               APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL,
@@ -776,7 +1223,11 @@ static bool app_load_drive0_image(void)
         image_order = (order == APP_DISK_ORDER_PRODOS)
                           ? APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL
                           : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
-        loaded = app_load_memory_drive(0U, dos_3_3_dsk_start, image_size, image_order);
+        loaded = app_load_memory_drive(0U,
+                                       APP_DISK_IMAGE_DSK,
+                                       dos_3_3_dsk_start,
+                                       image_size,
+                                       image_order);
         if (loaded) {
             ESP_LOGI(TAG,
                      "Loaded embedded .dsk disk (%u bytes, %s order)",
@@ -785,6 +1236,7 @@ static bool app_load_drive0_image(void)
         }
 #else
         loaded = app_load_memory_drive(0U,
+                                       APP_DISK_IMAGE_DSK,
                                        dos_3_3_dsk_start,
                                        image_size,
                                        APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL);
@@ -796,7 +1248,12 @@ static bool app_load_drive0_image(void)
             ESP_LOGE(TAG, "Embedded .dsk disk rejected, size=%u", (unsigned)image_size);
             return false;
         }
-        app_set_builtin_drive(0U, dos_3_3_dsk_start, image_size, image_order, "dos_3.3.dsk");
+        app_set_builtin_drive(0U,
+                              APP_DISK_IMAGE_DSK,
+                              dos_3_3_dsk_start,
+                              image_size,
+                              image_order,
+                              "dos_3.3.dsk");
         return true;
     }
 #else

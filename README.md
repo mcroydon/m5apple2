@@ -11,7 +11,7 @@ Current scope:
 - Cardputer keyboard input for the original Cardputer matrix and ADV keypad controller
 - USB/UART console input fallback for development on-device
 - Optional embedded ROM loading from `roms/apple2plus.rom`
-- Read-only Disk II slot-6 boot support for 140 KB `.do`, `.po`, or `.dsk` images
+- Read-only Disk II slot-6 boot support for `.do`, `.po`, `.dsk`, `.nib`, and `.woz` images
 - Host-side regression tests for CPU, video mapping, soft switches, and disk boot smoke
 
 Legal note:
@@ -28,15 +28,18 @@ Usage:
   or full Apple II Plus `0x5000` byte dumps mapped at `B000-FFFF`.
 - Optionally place a Disk II controller ROM at `roms/disk2.rom`.
   If present, it is embedded and mapped into slot 6 at `C600-C6FF`.
-- Optionally place a bootable 140 KB disk image at one of:
+- Optionally place a bootable disk image at one of:
+  `roms/dos_3.3.woz`,
+  `roms/dos_3.3.nib`,
   `roms/dos_3.3.do`,
   `roms/dos_3.3.po`,
   or `roms/dos_3.3.dsk`.
-  The app prefers explicit `.do`, then `.po`, then `.dsk`.
+  The app prefers `.woz`, then `.nib`, then explicit `.do`, then `.po`, then
+  `.dsk`.
   Ambiguous `.dsk` images are probed at startup and loaded as DOS-order or
   ProDOS-order based on which boot path looks more plausible.
-- Optionally place additional `140 KB` `.do`, `.po`, or `.dsk` images in the
-  root of a FAT-formatted SD card.
+- Optionally place additional `.do`, `.po`, `.dsk`, `.nib`, or `.woz` images in
+  the root of a FAT-formatted SD card.
   On startup, the app mounts `/sd`, scans for disk images, and auto-inserts:
   the first SD image into drive 2 when an embedded boot disk is present, or
   the first two SD images into drives 1 and 2 when no embedded disk is built in.
@@ -51,8 +54,10 @@ Current limitations:
 
 - Disk II support is currently read-only.
 - The Cardputer app now accepts explicit DOS-order `.do` and ProDOS-order `.po`
-  images, and probes ambiguous `.dsk` images when the system and Disk II ROMs
-  are available.
+  images, probes ambiguous `.dsk` images when the system and Disk II ROMs are
+  available, and can mount raw-track `.nib` plus 5.25" `WOZ1/WOZ2` images.
+- `.woz` support currently uses the `TMAP` and `TRKS` chunks only; flux chunks
+  and writeback paths are not implemented.
 - SD-backed disk mounting uses configurable SDSPI pins in `menuconfig`.
   The default pin set is intended for Cardputer-class hardware but still needs
   hardware validation.

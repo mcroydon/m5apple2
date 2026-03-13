@@ -20,7 +20,6 @@ typedef enum {
     APPLE2_DISK2_SOURCE_SECTOR_IMAGE,
     APPLE2_DISK2_SOURCE_SECTOR_READER,
     APPLE2_DISK2_SOURCE_NIB_IMAGE,
-    APPLE2_DISK2_SOURCE_WOZ_IMAGE,
     APPLE2_DISK2_SOURCE_TRACK_READER,
 } apple2_disk2_source_kind_t;
 
@@ -37,16 +36,13 @@ typedef bool (*apple2_disk2_read_track_fn)(void *context,
                                            uint16_t *track_length);
 
 typedef struct {
-    bool present;
     uint32_t offset;
-    uint32_t bit_count;
     uint16_t byte_count;
 } apple2_woz_track_t;
 
 typedef struct {
     bool valid;
     bool is_woz2;
-    uint8_t disk_type;
     uint8_t tmap[APPLE2_DISK2_WOZ_TMAP_ENTRIES];
     apple2_woz_track_t tracks[APPLE2_DISK2_WOZ_TMAP_ENTRIES];
 } apple2_woz_image_t;
@@ -57,7 +53,6 @@ typedef struct {
     const uint8_t *image[2];
     size_t image_size[2];
     apple2_disk2_image_order_t image_order[2];
-    apple2_woz_image_t woz[2];
     apple2_disk2_read_sector_fn read_sector[2];
     void *read_sector_context[2];
     apple2_disk2_read_track_fn read_track[2];
@@ -95,10 +90,6 @@ bool apple2_disk2_load_drive_with_order(apple2_disk2_t *disk2,
                                         size_t image_size,
                                         apple2_disk2_image_order_t image_order);
 bool apple2_disk2_load_nib_drive(apple2_disk2_t *disk2,
-                                 unsigned drive_index,
-                                 const uint8_t *image,
-                                 size_t image_size);
-bool apple2_disk2_load_woz_drive(apple2_disk2_t *disk2,
                                  unsigned drive_index,
                                  const uint8_t *image,
                                  size_t image_size);

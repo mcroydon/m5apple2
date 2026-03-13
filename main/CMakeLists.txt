@@ -11,7 +11,9 @@ file(GLOB M5APPLE2_EMBED_WATCH CONFIGURE_DEPENDS
     "${PROJECT_DIR}/roms/*.rom"
     "${PROJECT_DIR}/roms/*.do"
     "${PROJECT_DIR}/roms/*.po"
-    "${PROJECT_DIR}/roms/*.dsk")
+    "${PROJECT_DIR}/roms/*.dsk"
+    "${PROJECT_DIR}/roms/*.nib"
+    "${PROJECT_DIR}/roms/*.woz")
 
 function(m5apple2_add_embedded_rom source_path generated_name define_name)
     set(source_abs "${PROJECT_DIR}/${source_path}")
@@ -32,3 +34,5 @@ m5apple2_add_embedded_rom("roms/disk2.rom" "disk2.rom" "M5APPLE2_HAS_DISK2_ROM")
 m5apple2_add_embedded_rom("roms/dos_3.3.do" "dos_3.3.do" "M5APPLE2_HAS_DOS33_DO")
 m5apple2_add_embedded_rom("roms/dos_3.3.po" "dos_3.3.po" "M5APPLE2_HAS_DOS33_PO")
 m5apple2_add_embedded_rom("roms/dos_3.3.dsk" "dos_3.3.dsk" "M5APPLE2_HAS_DOS33_DSK")
+m5apple2_add_embedded_rom("roms/dos_3.3.nib" "dos_3.3.nib" "M5APPLE2_HAS_DOS33_NIB")
+m5apple2_add_embedded_rom("roms/dos_3.3.woz" "dos_3.3.woz" "M5APPLE2_HAS_DOS33_WOZ")

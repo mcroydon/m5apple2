@@ -287,6 +287,35 @@ static bool test_track_reader(void *context,
     return true;
 }
 
+typedef struct {
+    const uint8_t *image;
+    size_t image_size;
+    apple2_woz_image_t woz;
+} test_woz_reader_t;
+
+static bool test_woz_track_reader(void *context,
+                                  unsigned drive_index,
+                                  uint8_t quarter_track,
+                                  uint8_t *track_data,
+                                  uint16_t *track_length)
+{
+    const test_woz_reader_t *reader = context;
+    const uint8_t *source = NULL;
+
+    (void)drive_index;
+    if (!apple2_woz_get_track(&reader->woz,
+                              reader->image,
+                              reader->image_size,
+                              quarter_track,
+                              &source,
+                              track_length)) {
+        return false;
+    }
+
+    memcpy(track_data, source, *track_length);
+    return true;
+}
+
 static void test_drive1_and_reader_loading(void)
 {
     apple2_machine_t machine;
@@ -444,8 +473,9 @@ static size_t test_build_woz2(uint8_t *image, size_t capacity, uint8_t track0_va
 
 static void test_woz_loading(void)
 {
-    apple2_machine_t machine;
+    apple2_disk2_t disk2;
     apple2_woz_image_t woz;
+    test_woz_reader_t reader;
     uint8_t woz1[12U + 8U + 60U + 8U + APPLE2_DISK2_WOZ_TMAP_ENTRIES + 8U + (2U * 6656U)];
     uint8_t woz2[2560U];
     size_t woz1_size;
@@ -461,16 +491,19 @@ static void test_woz_loading(void)
     assert(track_data[0] == 0xD5U);
 
     woz2_size = test_build_woz2(woz2, sizeof(woz2), 0x96U, 0x97U);
-    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
-    assert(apple2_machine_load_drive0_woz(&machine, woz2, woz2_size));
-    assert(machine.disk2.source_kind[0] == APPLE2_DISK2_SOURCE_WOZ_IMAGE);
+    assert(apple2_woz_parse(&reader.woz, woz2, woz2_size));
+    reader.image = woz2;
+    reader.image_size = woz2_size;
 
-    (void)apple2_disk2_access(&machine.disk2, 0x9U);
-    assert(apple2_disk2_access(&machine.disk2, 0xCU) == 0x96U);
-    machine.disk2.quarter_track[0] = 4U;
-    machine.disk2.nibble_pos[0] = 0U;
-    machine.disk2.track_cache_valid = false;
-    assert(apple2_disk2_access(&machine.disk2, 0xCU) == 0x97U);
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_attach_drive_track_reader(&disk2, 0, test_woz_track_reader, &reader));
+
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(apple2_disk2_access(&disk2, 0xCU) == 0x96U);
+    disk2.quarter_track[0] = 4U;
+    disk2.nibble_pos[0] = 0U;
+    disk2.track_cache_valid = false;
+    assert(apple2_disk2_access(&disk2, 0xCU) == 0x97U);
 }
 
 static void test_disk2_stepper_quarter_tracks(void)
