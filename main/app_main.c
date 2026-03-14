@@ -36,10 +36,25 @@ typedef struct {
     uint64_t frame_present_us;
     uint32_t frames_presented;
     uint32_t text_frames;
+    uint32_t text_frames_skipped;
     uint32_t graphics_frames;
 } app_perf_counters_t;
 
 static app_perf_counters_t s_perf;
+
+#define APP_TEXT_ROWS 24U
+#define APP_TEXT_COLUMNS 40U
+#define APP_TEXT_BYTES (APP_TEXT_ROWS * APP_TEXT_COLUMNS)
+
+typedef struct {
+    bool valid;
+    bool displayed;
+    bool page2;
+    bool flash_state;
+    uint8_t cells[APP_TEXT_BYTES];
+} app_text_frame_cache_t;
+
+static app_text_frame_cache_t s_text_cache;
 
 #ifdef CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
 #define APP_FRAME_INTERVAL_US 33333
@@ -312,6 +327,43 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
         app_puts_at(12, 2, line3);
     }
     app_puts_at(20, 2, "ESC RESETS THE EMULATOR");
+}
+
+static void app_text_cache_reset(void)
+{
+    memset(&s_text_cache, 0, sizeof(s_text_cache));
+}
+
+static void app_text_cache_mark_hidden(void)
+{
+    s_text_cache.displayed = false;
+}
+
+static bool app_text_frame_dirty(const apple2_machine_t *machine)
+{
+    bool changed = !s_text_cache.valid || !s_text_cache.displayed ||
+                   s_text_cache.page2 != machine->video.page2 ||
+                   s_text_cache.flash_state != machine->video.flash_state;
+    size_t offset = 0U;
+
+    for (uint8_t row = 0; row < APP_TEXT_ROWS; ++row) {
+        const uint16_t row_address = apple2_text_row_address(machine->video.page2, row);
+        const uint8_t *source = &machine->memory[row_address];
+
+        if (!changed && memcmp(&s_text_cache.cells[offset], source, APP_TEXT_COLUMNS) == 0) {
+            offset += APP_TEXT_COLUMNS;
+            continue;
+        }
+
+        memcpy(&s_text_cache.cells[offset], source, APP_TEXT_COLUMNS);
+        changed = true;
+        offset += APP_TEXT_COLUMNS;
+    }
+
+    s_text_cache.valid = true;
+    s_text_cache.page2 = machine->video.page2;
+    s_text_cache.flash_state = machine->video.flash_state;
+    return changed;
 }
 
 static bool app_builtin_woz_read_track(void *context,
@@ -1314,7 +1366,7 @@ static void app_perf_log_if_due(int64_t now_us)
         ESP_LOGI(TAG,
                  "perf apple=%" PRIu64 ".%03" PRIu64 "MHz fps=%" PRIu32 ".%" PRIu32
                  " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
-                 "%% frames=%" PRIu32 " text=%" PRIu32 " gfx=%" PRIu32,
+                 "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32,
                  effective_khz / 1000ULL,
                  effective_khz % 1000ULL,
                  fps_x10 / 10U,
@@ -1324,6 +1376,7 @@ static void app_perf_log_if_due(int64_t now_us)
                  present_pct,
                  s_perf.frames_presented,
                  s_perf.text_frames,
+                 s_perf.text_frames_skipped,
                  s_perf.graphics_frames);
     }
 
@@ -1368,6 +1421,7 @@ void app_main(void)
     last_cpu_tick_us = esp_timer_get_time();
     last_frame_tick_us = last_cpu_tick_us;
     app_perf_reset(last_cpu_tick_us);
+    app_text_cache_reset();
 
     while (true) {
         uint8_t ascii = 0;
@@ -1406,19 +1460,28 @@ void app_main(void)
         last_cpu_tick_us = now_us;
 
         if ((now_us - last_frame_tick_us) >= APP_FRAME_INTERVAL_US) {
-            const int64_t compose_start_us = esp_timer_get_time();
             if (s_machine.video.text_mode) {
                 s_perf.text_frames++;
-                s_perf.frame_compose_us += (uint64_t)(esp_timer_get_time() - compose_start_us);
-                {
-                    const int64_t present_start_us = esp_timer_get_time();
+                if (app_text_frame_dirty(&s_machine)) {
+                    const int64_t compose_start_us = esp_timer_get_time();
 
-                    ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
-                                                                            s_machine.memory,
-                                                                            &s_machine.video));
-                    s_perf.frame_present_us += (uint64_t)(esp_timer_get_time() - present_start_us);
+                    s_perf.frame_compose_us += (uint64_t)(esp_timer_get_time() - compose_start_us);
+                    {
+                        const int64_t present_start_us = esp_timer_get_time();
+
+                        ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
+                                                                                s_machine.memory,
+                                                                                &s_machine.video));
+                        s_perf.frame_present_us += (uint64_t)(esp_timer_get_time() - present_start_us);
+                    }
+                    s_text_cache.displayed = true;
+                    s_perf.frames_presented++;
+                } else {
+                    s_perf.text_frames_skipped++;
                 }
             } else {
+                const int64_t compose_start_us = esp_timer_get_time();
+
                 apple2_machine_render(&s_machine, s_apple2_pixels);
                 s_perf.graphics_frames++;
                 s_perf.frame_compose_us += (uint64_t)(esp_timer_get_time() - compose_start_us);
@@ -1431,8 +1494,9 @@ void app_main(void)
                                                                      APPLE2_VIDEO_HEIGHT));
                     s_perf.frame_present_us += (uint64_t)(esp_timer_get_time() - present_start_us);
                 }
+                app_text_cache_mark_hidden();
+                s_perf.frames_presented++;
             }
-            s_perf.frames_presented++;
             last_frame_tick_us = now_us;
         }
 
