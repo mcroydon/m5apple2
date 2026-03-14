@@ -166,15 +166,8 @@ static size_t s_sd_disk_count;
 static int s_sd_drive_index[2] = { -1, -1 };
 static bool s_sd_mounted;
 
-typedef enum {
-    APP_VERTICAL_MODE_AUTO = 0,
-    APP_VERTICAL_MODE_APPLE2 = 1,
-    APP_VERTICAL_MODE_CTRL_PN = 2,
-} app_vertical_mode_t;
-
 static const uint8_t s_speed_multipliers[] = { 1U, 2U, 4U };
 static size_t s_speed_multiplier_index;
-static app_vertical_mode_t s_vertical_mode = APP_VERTICAL_MODE_AUTO;
 
 #if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
 static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
@@ -1012,62 +1005,6 @@ static bool app_sd_probe_file_order(const char *path)
     return order == APP_DISK_ORDER_PRODOS;
 }
 
-static const char *app_active_drive_label(unsigned drive_index)
-{
-    if (drive_index >= 2U) {
-        return NULL;
-    }
-    if (s_sd_drive_index[drive_index] >= 0 &&
-        (size_t)s_sd_drive_index[drive_index] < s_sd_disk_count) {
-        return s_sd_disks[s_sd_drive_index[drive_index]].name;
-    }
-    if (s_builtin_drives[drive_index].present) {
-        return s_builtin_drives[drive_index].label;
-    }
-
-    return NULL;
-}
-
-static const char *app_vertical_mode_name(app_vertical_mode_t mode)
-{
-    switch (mode) {
-    case APP_VERTICAL_MODE_AUTO:
-        return "auto";
-    case APP_VERTICAL_MODE_APPLE2:
-        return "apple2";
-    case APP_VERTICAL_MODE_CTRL_PN:
-        return "ctrl-pn";
-    default:
-        return "unknown";
-    }
-}
-
-static app_vertical_mode_t app_effective_vertical_mode(void)
-{
-    const char *label;
-
-    if (s_vertical_mode != APP_VERTICAL_MODE_AUTO) {
-        return s_vertical_mode;
-    }
-
-    label = app_active_drive_label(0U);
-    if (label != NULL &&
-        (strcasestr(label, "visi") != NULL || strcasestr(label, "vc/80") != NULL)) {
-        return APP_VERTICAL_MODE_CTRL_PN;
-    }
-
-    return APP_VERTICAL_MODE_APPLE2;
-}
-
-static uint8_t app_vertical_key_ascii(bool up)
-{
-    if (app_effective_vertical_mode() == APP_VERTICAL_MODE_CTRL_PN) {
-        return up ? 0x10U : 0x0EU;
-    }
-
-    return up ? 0x0BU : 0x0AU;
-}
-
 static uint8_t app_speed_multiplier(void)
 {
     return s_speed_multipliers[s_speed_multiplier_index];
@@ -1078,22 +1015,6 @@ static void app_toggle_speed_multiplier(void)
     s_speed_multiplier_index = (s_speed_multiplier_index + 1U) %
                                (sizeof(s_speed_multipliers) / sizeof(s_speed_multipliers[0]));
     ESP_LOGI(TAG, "Emulation speed set to %ux", (unsigned)app_speed_multiplier());
-}
-
-static void app_toggle_vertical_mode(void)
-{
-    const char *label;
-    app_vertical_mode_t effective_mode;
-
-    s_vertical_mode = (app_vertical_mode_t)(((unsigned)s_vertical_mode + 1U) % 3U);
-    effective_mode = app_effective_vertical_mode();
-    label = app_active_drive_label(0U);
-    ESP_LOGI(TAG,
-             "Vertical cursor mode set to %s (effective %s%s%s)",
-             app_vertical_mode_name(s_vertical_mode),
-             app_vertical_mode_name(effective_mode),
-             label != NULL ? ", drive1=" : "",
-             label != NULL ? label : "");
 }
 
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
@@ -1562,12 +1483,6 @@ void app_main(void)
                 app_sd_rescan();
             } else if (ascii == CARDPUTER_INPUT_CMD_SPEED_TOGGLE) {
                 app_toggle_speed_multiplier();
-            } else if (ascii == CARDPUTER_INPUT_CMD_CURSOR_MODE) {
-                app_toggle_vertical_mode();
-            } else if (ascii == CARDPUTER_INPUT_CMD_CURSOR_UP) {
-                apple2_machine_set_key(&s_machine, app_vertical_key_ascii(true));
-            } else if (ascii == CARDPUTER_INPUT_CMD_CURSOR_DOWN) {
-                apple2_machine_set_key(&s_machine, app_vertical_key_ascii(false));
             } else if (ascii == 0x1BU) {
                 apple2_machine_reset(&s_machine);
                 if (!rom_loaded) {

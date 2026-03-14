@@ -133,12 +133,9 @@ static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
     case '8':
         *ascii = CARDPUTER_INPUT_CMD_SPEED_TOGGLE;
         return true;
-    case '9':
-        *ascii = CARDPUTER_INPUT_CMD_CURSOR_MODE;
-        return true;
     case 'i':
     case ';':
-        *ascii = CARDPUTER_INPUT_CMD_CURSOR_UP;
+        *ascii = 0x0BU; /* Up */
         return true;
     case 'j':
     case ',':
@@ -146,7 +143,7 @@ static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
         return true;
     case 'k':
     case '.':
-        *ascii = CARDPUTER_INPUT_CMD_CURSOR_DOWN;
+        *ascii = 0x0AU; /* Down */
         return true;
     case 'l':
     case '/':

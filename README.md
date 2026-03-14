@@ -52,8 +52,6 @@ Usage:
 - On-device Apple II cursor hotkeys:
   `Fn+I/J/K/L` emits up/left/down/right,
   and `Fn+; , . /` provides the same directions on the punctuation cluster.
-  `Fn+9` cycles the vertical-key mode between `auto`, `apple2`, and `ctrl-pn`;
-  `auto` prefers the `ctrl-pn` vertical mapping for VisiCalc-labeled boot disks.
 - Rebuild the firmware. `main/CMakeLists.txt` will embed that ROM into the app.
 - Flash with `python "$IDF_PATH/tools/idf.py" -p PORT flash`.
 
