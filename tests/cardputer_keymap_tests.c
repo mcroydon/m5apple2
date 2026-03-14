@@ -119,6 +119,16 @@ static void test_fn_disk_commands(void)
                                             &ascii));
     assert(ascii == CARDPUTER_INPUT_CMD_SD_RESCAN);
 
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 3),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 3U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_ORDER1);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 4),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 4U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_ORDER2);
+
     assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 8),
                                             (cardputer_keycoord_t){ .row = 0U, .column = 8U },
                                             &ascii));

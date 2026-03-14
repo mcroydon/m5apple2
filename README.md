@@ -46,6 +46,8 @@ Usage:
 - On-device SD hotkeys:
   `Fn+1` cycles drive 1,
   `Fn+2` cycles drive 2,
+  `Fn+3` cycles drive 1 `.dsk` order override between `auto`, `DOS`, and `ProDOS`,
+  `Fn+4` cycles drive 2 `.dsk` order override between `auto`, `DOS`, and `ProDOS`,
   `Fn+0` rescans the SD card.
 - On-device performance hotkey:
   `Fn+8` cycles emulation speed between `1x`, `2x`, and `4x`.

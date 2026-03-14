@@ -109,6 +109,12 @@ typedef enum {
     APP_DISK_IMAGE_WOZ,
 } app_disk_image_type_t;
 
+typedef enum {
+    APP_SD_DSK_ORDER_AUTO = 0,
+    APP_SD_DSK_ORDER_DOS33,
+    APP_SD_DSK_ORDER_PRODOS,
+} app_sd_dsk_order_override_t;
+
 typedef struct {
     bool present;
     app_disk_image_type_t type;
@@ -164,6 +170,7 @@ static app_sd_drive_file_t s_sd_drive_files[2];
 static sdmmc_card_t *s_sd_card;
 static size_t s_sd_disk_count;
 static int s_sd_drive_index[2] = { -1, -1 };
+static app_sd_dsk_order_override_t s_sd_dsk_order_override[2];
 static bool s_sd_mounted;
 
 static const uint8_t s_speed_multipliers[] = { 1U, 2U, 4U };
@@ -1005,6 +1012,19 @@ static bool app_sd_probe_file_order(const char *path)
     return order == APP_DISK_ORDER_PRODOS;
 }
 
+static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t override)
+{
+    switch (override) {
+    case APP_SD_DSK_ORDER_DOS33:
+        return "DOS";
+    case APP_SD_DSK_ORDER_PRODOS:
+        return "ProDOS";
+    case APP_SD_DSK_ORDER_AUTO:
+    default:
+        return "auto";
+    }
+}
+
 static uint8_t app_speed_multiplier(void)
 {
     return s_speed_multipliers[s_speed_multiplier_index];
@@ -1062,9 +1082,20 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
                                                     image_order);
         break;
     case APP_DISK_IMAGE_DSK:
-        image_order = app_sd_probe_file_order(disk->path)
-                          ? APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL
-                          : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+        switch (s_sd_dsk_order_override[drive_index]) {
+        case APP_SD_DSK_ORDER_DOS33:
+            image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+            break;
+        case APP_SD_DSK_ORDER_PRODOS:
+            image_order = APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL;
+            break;
+        case APP_SD_DSK_ORDER_AUTO:
+        default:
+            image_order = app_sd_probe_file_order(disk->path)
+                              ? APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL
+                              : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+            break;
+        }
         attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
                                                     drive_index,
                                                     app_sd_read_sector,
@@ -1102,11 +1133,20 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     case APP_DISK_IMAGE_PO:
     case APP_DISK_IMAGE_DSK:
     case APP_DISK_IMAGE_DO:
-        ESP_LOGI(TAG,
-                 "Mounted SD disk %s in drive %u (%s order)",
-                 disk->name,
-                 (unsigned)(drive_index + 1U),
-                 (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS");
+        if (disk->type == APP_DISK_IMAGE_DSK) {
+            ESP_LOGI(TAG,
+                     "Mounted SD disk %s in drive %u (%s order, override=%s)",
+                     disk->name,
+                     (unsigned)(drive_index + 1U),
+                     (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS",
+                     app_sd_dsk_order_override_name(s_sd_dsk_order_override[drive_index]));
+        } else {
+            ESP_LOGI(TAG,
+                     "Mounted SD disk %s in drive %u (%s order)",
+                     disk->name,
+                     (unsigned)(drive_index + 1U),
+                     (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS");
+        }
         break;
     case APP_DISK_IMAGE_NIB:
         ESP_LOGI(TAG, "Mounted SD disk %s in drive %u (NIB)", disk->name, (unsigned)(drive_index + 1U));
@@ -1213,6 +1253,43 @@ static void app_sd_cycle_drive(unsigned drive_index)
             apple2_disk2_unload_drive(&s_machine.disk2, drive_index);
         }
     }
+#endif
+}
+
+static void app_sd_cycle_dsk_order(unsigned drive_index)
+{
+#if !CONFIG_M5APPLE2_SD_ENABLE
+    (void)drive_index;
+    ESP_LOGW(TAG, "SD disk library is disabled in menuconfig");
+    return;
+#else
+    const int disk_index =
+        (drive_index < 2U) ? s_sd_drive_index[drive_index] : -1;
+    app_sd_dsk_order_override_t previous_override;
+
+    if (drive_index >= 2U || disk_index < 0 || (size_t)disk_index >= s_sd_disk_count) {
+        ESP_LOGW(TAG, "No mounted SD disk available for drive %u order override", (unsigned)(drive_index + 1U));
+        return;
+    }
+    if (s_sd_disks[disk_index].type != APP_DISK_IMAGE_DSK) {
+        ESP_LOGW(TAG, "Drive %u order override only applies to .dsk images", (unsigned)(drive_index + 1U));
+        return;
+    }
+
+    previous_override = s_sd_dsk_order_override[drive_index];
+    s_sd_dsk_order_override[drive_index] =
+        (app_sd_dsk_order_override_t)(((unsigned)s_sd_dsk_order_override[drive_index] + 1U) % 3U);
+    if (!app_sd_mount_disk(drive_index, (size_t)disk_index)) {
+        s_sd_dsk_order_override[drive_index] = previous_override;
+        (void)app_sd_mount_disk(drive_index, (size_t)disk_index);
+        ESP_LOGW(TAG, "Failed to apply .dsk order override on drive %u", (unsigned)(drive_index + 1U));
+        return;
+    }
+
+    ESP_LOGI(TAG,
+             "Drive %u .dsk order override -> %s",
+             (unsigned)(drive_index + 1U),
+             app_sd_dsk_order_override_name(s_sd_dsk_order_override[drive_index]));
 #endif
 }
 
@@ -1479,6 +1556,10 @@ void app_main(void)
                 app_sd_cycle_drive(0U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE2) {
                 app_sd_cycle_drive(1U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_SD_ORDER1) {
+                app_sd_cycle_dsk_order(0U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_SD_ORDER2) {
+                app_sd_cycle_dsk_order(1U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_RESCAN) {
                 app_sd_rescan();
             } else if (ascii == CARDPUTER_INPUT_CMD_SPEED_TOGGLE) {
