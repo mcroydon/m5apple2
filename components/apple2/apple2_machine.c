@@ -39,19 +39,23 @@ static inline void apple2_machine_tick_flash(apple2_machine_t *machine, uint32_t
     }
 
     machine->flash_cycle_accum += cycles;
+    if (machine->flash_cycle_accum < machine->flash_half_period_cycles) {
+        return;
+    }
+
     while (machine->flash_cycle_accum >= machine->flash_half_period_cycles) {
         machine->flash_cycle_accum -= machine->flash_half_period_cycles;
         machine->video.flash_state = !machine->video.flash_state;
     }
 }
 
-static uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
+static inline uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
 {
     machine->floating_bus = value;
     return value;
 }
 
-static void apple2_select_slot_c8(apple2_machine_t *machine, uint16_t address)
+static inline void apple2_select_slot_c8(apple2_machine_t *machine, uint16_t address)
 {
     if (address >= 0xC100U && address < 0xC800U) {
         machine->c8_slot = (uint8_t)((address >> 8) & 0x07U);
@@ -61,6 +65,19 @@ static void apple2_select_slot_c8(apple2_machine_t *machine, uint16_t address)
 static uint8_t apple2_bus_read(void *context, uint16_t address)
 {
     apple2_machine_t *machine = context;
+
+    if (address < 0xC000U) {
+        return apple2_bus_value(machine, machine->memory[address]);
+    }
+    if (address >= APPLE2_ROM_BASE) {
+        return apple2_bus_value(machine, machine->memory[address]);
+    }
+    if (address >= 0xC800U) {
+        if (address == 0xCFFFU) {
+            machine->c8_slot = 0U;
+        }
+        return apple2_bus_value(machine, machine->memory[address]);
+    }
 
     switch (address) {
     case 0xC000:
@@ -137,13 +154,6 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
         return apple2_bus_value(machine, machine->floating_bus);
     }
 
-    if (address >= 0xC800U && address < APPLE2_ROM_BASE) {
-        if (address == 0xCFFFU) {
-            machine->c8_slot = 0U;
-        }
-        return apple2_bus_value(machine, machine->memory[address]);
-    }
-
     return apple2_bus_value(machine, machine->memory[address]);
 }
 
@@ -151,6 +161,11 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
 {
     apple2_machine_t *machine = context;
     machine->floating_bus = value;
+
+    if (address < 0xC000U) {
+        machine->memory[address] = value;
+        return;
+    }
 
     switch (address) {
     case 0xC010:
