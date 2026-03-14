@@ -88,6 +88,16 @@ const uint8_t *apple2_ascii_font(uint8_t ascii)
     return s_ascii_font[ascii - 32U];
 }
 
+bool apple2_text_code_is_flashing(uint8_t code)
+{
+    return (code & 0xC0U) == 0x40U;
+}
+
+bool apple2_text_code_is_flash_space(uint8_t code)
+{
+    return apple2_text_code_is_flashing(code) && (code & 0x3FU) == 0x20U;
+}
+
 uint8_t apple2_text_code_to_ascii(uint8_t code, bool *inverse)
 {
     const uint8_t glyph_index = (uint8_t)(code & 0x3FU);
@@ -111,7 +121,7 @@ static void apple2_render_text_row(const uint8_t *memory, const apple2_video_sta
     for (uint8_t column = 0; column < 40U; ++column) {
         bool inverse = false;
         const uint8_t code = memory[(uint16_t)(row_address + column)];
-        const bool flashing = ((code & 0xC0U) == 0x40U);
+        const bool flashing = apple2_text_code_is_flashing(code);
         const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
         const uint8_t *glyph = apple2_ascii_font(ascii);
         const bool cell_inverse = inverse || (flashing && state->flash_state);

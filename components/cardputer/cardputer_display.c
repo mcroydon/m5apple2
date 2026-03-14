@@ -173,7 +173,7 @@ static bool cardputer_display_text_row_active(const uint8_t *memory,
     for (uint8_t column = 0; column < 40U; ++column) {
         bool inverse = false;
         const uint8_t code = memory[(uint16_t)(row_address + column)];
-        const bool flashing = ((code & 0xC0U) == 0x40U) && state->flash_state;
+        const bool flashing = apple2_text_code_is_flashing(code) && state->flash_state;
         const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
 
         if (ascii != ' ' || inverse || flashing) {
@@ -184,21 +184,25 @@ static bool cardputer_display_text_row_active(const uint8_t *memory,
     return false;
 }
 
-static bool cardputer_display_text_row_focus(const uint8_t *memory,
-                                             const apple2_video_state_t *state,
-                                             uint8_t row)
+static uint8_t cardputer_display_text_row_focus_score(const uint8_t *memory,
+                                                      const apple2_video_state_t *state,
+                                                      uint8_t row)
 {
     const uint16_t row_address = apple2_text_row_address(state->page2, row);
+    uint8_t score = 0U;
 
     for (uint8_t column = 0; column < 40U; ++column) {
         const uint8_t code = memory[(uint16_t)(row_address + column)];
 
-        if ((code & 0xC0U) == 0x40U) {
-            return true;
+        if (apple2_text_code_is_flash_space(code)) {
+            return 2U;
+        }
+        if (apple2_text_code_is_flashing(code)) {
+            score = 1U;
         }
     }
 
-    return false;
+    return score;
 }
 
 esp_err_t cardputer_display_init(cardputer_display_t *display)
@@ -308,6 +312,7 @@ esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
     uint8_t first_active = 24U;
     uint8_t last_active = 0U;
     uint8_t focus_row = 24U;
+    uint8_t focus_score = 0U;
     uint8_t first_row;
     uint8_t last_row;
     uint8_t active_rows;
@@ -326,8 +331,13 @@ esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
             first_active = row;
         }
         last_active = row;
-        if (cardputer_display_text_row_focus(memory, state, row)) {
-            focus_row = row;
+        {
+            const uint8_t row_focus_score = cardputer_display_text_row_focus_score(memory, state, row);
+
+            if (row_focus_score >= focus_score) {
+                focus_score = row_focus_score;
+                focus_row = row;
+            }
         }
     }
 
@@ -384,7 +394,7 @@ esp_err_t cardputer_display_present_apple2_text40(cardputer_display_t *display,
         for (uint8_t column = 0; column < 40U; ++column) {
             bool inverse = false;
             const uint8_t code = memory[(uint16_t)(row_address + column)];
-            const bool flashing = ((code & 0xC0U) == 0x40U);
+            const bool flashing = apple2_text_code_is_flashing(code);
             const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
             const bool cell_inverse = inverse || (flashing && state->flash_state);
             const uint16_t cell_bg = cell_inverse ? fg : bg;

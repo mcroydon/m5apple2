@@ -152,6 +152,49 @@ static void test_text_code_mapping(void)
 
     assert(apple2_text_code_to_ascii(0xC1U, &inverse) == 'A');
     assert(!inverse);
+
+    assert(apple2_text_code_is_flashing(0x60U));
+    assert(apple2_text_code_is_flashing(0x7FU));
+    assert(!apple2_text_code_is_flashing(0xA0U));
+    assert(apple2_text_code_is_flash_space(0x60U));
+    assert(!apple2_text_code_is_flash_space(0x61U));
+}
+
+static void test_flash_cursor_render(void)
+{
+    apple2_machine_t machine;
+    uint8_t pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    machine.memory[0x0400] = 0x60U; /* Flashing space: the Monitor/BASIC cursor cell. */
+
+    machine.video.flash_state = false;
+    apple2_machine_render(&machine, pixels);
+    assert(pixels[0] == APPLE2_COLOR_BLACK);
+
+    machine.video.flash_state = true;
+    apple2_machine_render(&machine, pixels);
+    assert(pixels[0] == APPLE2_COLOR_WHITE);
+}
+
+static void test_flash_timing(void)
+{
+    apple2_machine_t machine;
+    uint32_t half_period_cycles;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    memset(&machine.memory[0x0200], 0xEA, 4096U);
+    fill_reset_vector(&machine, 0x0200);
+    apple2_machine_reset(&machine);
+
+    half_period_cycles = machine.flash_half_period_cycles;
+    assert(!machine.video.flash_state);
+
+    apple2_machine_step(&machine, half_period_cycles);
+    assert(machine.video.flash_state);
+
+    apple2_machine_step(&machine, half_period_cycles);
+    assert(!machine.video.flash_state);
 }
 
 static void test_full_apple2plus_rom_layout(void)
@@ -558,6 +601,8 @@ int main(void)
     test_video_addresses();
     test_text_render();
     test_text_code_mapping();
+    test_flash_cursor_render();
+    test_flash_timing();
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
     test_drive0_dsk_loading();

@@ -32,6 +32,19 @@ static bool apple2_is_board_rom_address(const apple2_machine_t *machine, uint16_
            address < (APPLE2_BOARD_ROM_BASE + APPLE2_BOARD_ROM_SIZE);
 }
 
+static inline void apple2_machine_tick_flash(apple2_machine_t *machine, uint32_t cycles)
+{
+    if (machine->flash_half_period_cycles == 0U || cycles == 0U) {
+        return;
+    }
+
+    machine->flash_cycle_accum += cycles;
+    while (machine->flash_cycle_accum >= machine->flash_half_period_cycles) {
+        machine->flash_cycle_accum -= machine->flash_half_period_cycles;
+        machine->video.flash_state = !machine->video.flash_state;
+    }
+}
+
 static uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
 {
     machine->floating_bus = value;
@@ -250,6 +263,11 @@ void apple2_machine_reset(apple2_machine_t *machine)
     machine->video.page2 = false;
     machine->video.hires_mode = false;
     machine->video.flash_state = false;
+    machine->flash_half_period_cycles = machine->config.cpu_hz / 4U;
+    if (machine->flash_half_period_cycles == 0U) {
+        machine->flash_half_period_cycles = 1U;
+    }
+    machine->flash_cycle_accum = 0U;
     apple2_disk2_reset(&machine->disk2);
     cpu6502_reset(&machine->cpu);
     machine->total_cycles = machine->cpu.total_cycles;
@@ -388,10 +406,7 @@ uint32_t apple2_machine_step_instruction(apple2_machine_t *machine)
     const uint32_t cycles = cpu6502_step(&machine->cpu);
     machine->total_cycles = machine->cpu.total_cycles;
     apple2_disk2_tick(&machine->disk2, machine->config.cpu_hz, cycles);
-    if (machine->config.cpu_hz >= 4U) {
-        const uint64_t flash_ticks = machine->total_cycles / (machine->config.cpu_hz / 4U);
-        machine->video.flash_state = (flash_ticks & 1U) != 0U;
-    }
+    apple2_machine_tick_flash(machine, cycles);
     return cycles;
 }
 
