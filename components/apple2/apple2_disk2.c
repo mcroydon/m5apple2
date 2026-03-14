@@ -52,6 +52,22 @@ static const int8_t s_stepper_state_for_mask[16] = {
 
 static bool disk2_latch_current_byte(apple2_disk2_t *disk2);
 
+static uint8_t disk2_track_cache_key_for_drive(const apple2_disk2_t *disk2,
+                                               uint8_t drive,
+                                               uint8_t quarter_track)
+{
+    switch (disk2->source_kind[drive]) {
+    case APPLE2_DISK2_SOURCE_SECTOR_IMAGE:
+    case APPLE2_DISK2_SOURCE_SECTOR_READER:
+    case APPLE2_DISK2_SOURCE_NIB_IMAGE:
+        return (uint8_t)(quarter_track & 0xFCU);
+    case APPLE2_DISK2_SOURCE_TRACK_READER:
+    case APPLE2_DISK2_SOURCE_NONE:
+    default:
+        return quarter_track;
+    }
+}
+
 static inline uint16_t disk2_le16(const uint8_t *data)
 {
     return (uint16_t)data[0] | (uint16_t)((uint16_t)data[1] << 8);
@@ -241,7 +257,7 @@ static bool disk2_set_track_cache(apple2_disk2_t *disk2,
     memcpy(disk2->track_cache, track_data, track_length);
     disk2->track_cache_valid = true;
     disk2->track_cache_drive = drive;
-    disk2->track_cache_quarter_track = quarter_track;
+    disk2->track_cache_key = disk2_track_cache_key_for_drive(disk2, drive, quarter_track);
     disk2->track_cache_length = track_length;
     return true;
 }
@@ -326,7 +342,7 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
 
     disk2->track_cache_valid = true;
     disk2->track_cache_drive = drive;
-    disk2->track_cache_quarter_track = quarter_track;
+    disk2->track_cache_key = disk2_track_cache_key_for_drive(disk2, drive, quarter_track);
     disk2->track_cache_length = (uint16_t)pos;
     return true;
 }
@@ -335,13 +351,14 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
 {
     const uint8_t drive = disk2->active_drive;
     const uint8_t quarter_track = disk2->quarter_track[drive];
+    const uint8_t cache_key = disk2_track_cache_key_for_drive(disk2, drive, quarter_track);
 
     if (drive >= 2U || !disk2->loaded[drive]) {
         return false;
     }
     if (disk2->track_cache_valid &&
         disk2->track_cache_drive == drive &&
-        disk2->track_cache_quarter_track == quarter_track) {
+        disk2->track_cache_key == cache_key) {
         return true;
     }
 
@@ -376,7 +393,7 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
 
         disk2->track_cache_valid = true;
         disk2->track_cache_drive = drive;
-        disk2->track_cache_quarter_track = quarter_track;
+        disk2->track_cache_key = cache_key;
         disk2->track_cache_length = track_length;
         return true;
     }
@@ -396,6 +413,7 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
     uint8_t *quarter_track = &disk2->quarter_track[drive];
     int8_t *stepper_state = &disk2->stepper_state[drive];
     const int8_t old_state = *stepper_state;
+    const uint8_t old_cache_key = disk2_track_cache_key_for_drive(disk2, drive, *quarter_track);
 
     if (enabled) {
         *phase_mask |= mask;
@@ -410,25 +428,27 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
             if (old_state >= 0) {
                 const uint8_t delta = (uint8_t)((new_state - old_state) & 0x07U);
 
-                if (delta != 0U && delta != 4U) {
-                    if (delta < 4U) {
-                        uint8_t steps = delta;
-                        while (steps-- != 0U && *quarter_track < APPLE2_DISK2_MAX_QUARTER_TRACK) {
-                            (*quarter_track)++;
-                            disk2->track_cache_valid = false;
+                    if (delta != 0U && delta != 4U) {
+                        if (delta < 4U) {
+                            uint8_t steps = delta;
+                            while (steps-- != 0U && *quarter_track < APPLE2_DISK2_MAX_QUARTER_TRACK) {
+                                (*quarter_track)++;
+                            }
+                        } else {
+                            uint8_t steps = (uint8_t)(8U - delta);
+                            while (steps-- != 0U && *quarter_track > 0U) {
+                                (*quarter_track)--;
+                            }
                         }
-                    } else {
-                        uint8_t steps = (uint8_t)(8U - delta);
-                        while (steps-- != 0U && *quarter_track > 0U) {
-                            (*quarter_track)--;
-                            disk2->track_cache_valid = false;
-                        }
-                    }
 
-                    disk2->stream_accum[drive] = 0U;
-                    if (disk2->motor_on) {
-                        (void)disk2_latch_current_byte(disk2);
-                    } else {
+                        if (disk2_track_cache_key_for_drive(disk2, drive, *quarter_track) != old_cache_key) {
+                            disk2->track_cache_valid = false;
+                        }
+
+                        disk2->stream_accum[drive] = 0U;
+                        if (disk2->motor_on) {
+                            (void)disk2_latch_current_byte(disk2);
+                        } else {
                         disk2->data_ready = false;
                         disk2->data_latch = 0x00U;
                     }

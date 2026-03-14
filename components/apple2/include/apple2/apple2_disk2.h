@@ -70,7 +70,7 @@ typedef struct {
     uint8_t data_latch;
     bool track_cache_valid;
     uint8_t track_cache_drive;
-    uint8_t track_cache_quarter_track;
+    uint8_t track_cache_key;
     uint16_t track_cache_length;
     uint8_t track_cache[APPLE2_DISK2_MAX_TRACK_BYTES];
 } apple2_disk2_t;
