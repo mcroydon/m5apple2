@@ -46,6 +46,7 @@ Usage:
 - On-device SD hotkeys:
   `Fn+5` opens the drive 1 disk picker,
   `Fn+6` opens the drive 2 disk picker,
+  `Fn+7` jumps straight to the slot 6 boot ROM (`C600G` equivalent),
   `Fn+1` cycles drive 1,
   `Fn+2` cycles drive 2,
   `Fn+3` cycles drive 1 `.dsk` order override between `auto`, `DOS`, and `ProDOS`,

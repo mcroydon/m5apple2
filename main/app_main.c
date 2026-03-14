@@ -448,6 +448,17 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
     app_puts_at(20, 2, "ESC RESETS THE EMULATOR");
 }
 
+static void app_boot_slot6(void)
+{
+    if (!s_machine.slot6_rom_loaded) {
+        ESP_LOGW(TAG, "Cannot boot slot 6 without Disk II ROM");
+        return;
+    }
+
+    apple2_machine_set_pc(&s_machine, 0xC600U);
+    ESP_LOGI(TAG, "Jumped to slot 6 boot ROM");
+}
+
 static void app_clear_text_screen(void)
 {
     for (uint8_t row = 0; row < APP_TEXT_ROWS; ++row) {
@@ -2021,6 +2032,8 @@ void app_main(void)
                 app_sd_picker_open(0U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_PICKER2) {
                 app_sd_picker_open(1U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_BOOT_SLOT6) {
+                app_boot_slot6();
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE1) {
                 app_sd_cycle_drive(0U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE2) {

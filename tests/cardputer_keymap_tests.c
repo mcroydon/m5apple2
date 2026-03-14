@@ -143,6 +143,11 @@ static void test_fn_disk_commands(void)
                                             (cardputer_keycoord_t){ .row = 0U, .column = 6U },
                                             &ascii));
     assert(ascii == CARDPUTER_INPUT_CMD_SD_PICKER2);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 7),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 7U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_BOOT_SLOT6);
 }
 
 static void test_fn_arrow_commands(void)
