@@ -6,6 +6,7 @@
 #define APPLE2_DISK2_SECTORS 16U
 #define APPLE2_DISK2_SECTOR_SIZE 256U
 #define APPLE2_DISK2_MAX_QUARTER_TRACK ((APPLE2_DISK2_TRACKS - 1U) * 4U)
+#define APPLE2_DISK2_BYTES_PER_SECOND 33280U
 
 #define APPLE2_WOZ_HEADER_SIZE 12U
 #define APPLE2_WOZ_CHUNK_HEADER_SIZE 8U
@@ -416,29 +417,43 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
     }
 }
 
-static uint8_t disk2_read_next_byte(apple2_disk2_t *disk2)
+static bool disk2_sync_data_latch(apple2_disk2_t *disk2)
 {
-    uint32_t *nibble_pos;
-
     if (!disk2->motor_on) {
         disk2->data_latch = 0x00U;
-        return disk2->data_latch;
+        return false;
     }
     if (!disk2_build_track_cache(disk2) || disk2->track_cache_length == 0U) {
         disk2->data_latch = 0x00U;
-        return disk2->data_latch;
+        return false;
+    }
+
+    {
+        uint32_t *nibble_pos = &disk2->nibble_pos[disk2->active_drive];
+
+        if (*nibble_pos >= disk2->track_cache_length) {
+            *nibble_pos = 0U;
+        }
+        disk2->data_latch = disk2->track_cache[*nibble_pos];
+    }
+    return true;
+}
+
+static bool disk2_advance_data_latch(apple2_disk2_t *disk2)
+{
+    uint32_t *nibble_pos;
+
+    if (!disk2_sync_data_latch(disk2)) {
+        return false;
     }
 
     nibble_pos = &disk2->nibble_pos[disk2->active_drive];
-    if (*nibble_pos >= disk2->track_cache_length) {
-        *nibble_pos = 0U;
-    }
-    disk2->data_latch = disk2->track_cache[*nibble_pos];
     (*nibble_pos)++;
     if (*nibble_pos >= disk2->track_cache_length) {
         *nibble_pos = 0U;
     }
-    return disk2->data_latch;
+    disk2->data_latch = disk2->track_cache[*nibble_pos];
+    return true;
 }
 
 bool apple2_woz_parse(apple2_woz_image_t *woz, const uint8_t *image, size_t image_size)
@@ -620,6 +635,7 @@ void apple2_disk2_reset(apple2_disk2_t *disk2)
     }
     memset(disk2->quarter_track, 0, sizeof(disk2->quarter_track));
     memset(disk2->nibble_pos, 0, sizeof(disk2->nibble_pos));
+    memset(disk2->stream_accum, 0, sizeof(disk2->stream_accum));
 }
 
 bool apple2_disk2_load_drive(apple2_disk2_t *disk2, unsigned drive_index, const uint8_t *image, size_t image_size)
@@ -719,10 +735,33 @@ void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
     disk2_clear_drive_source(disk2, drive_index);
     disk2->quarter_track[drive_index] = 0U;
     disk2->nibble_pos[drive_index] = 0U;
+    disk2->stream_accum[drive_index] = 0U;
     disk2->phase_mask[drive_index] = 0U;
     disk2->stepper_state[drive_index] = -1;
     if (disk2->active_drive == drive_index) {
         disk2->track_cache_valid = false;
+    }
+}
+
+void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
+{
+    uint32_t *stream_accum;
+
+    if (disk2 == NULL || cycles == 0U || cpu_hz == 0U || !disk2->motor_on ||
+        !disk2->loaded[disk2->active_drive]) {
+        return;
+    }
+    if (!disk2_sync_data_latch(disk2)) {
+        return;
+    }
+
+    stream_accum = &disk2->stream_accum[disk2->active_drive];
+    *stream_accum += APPLE2_DISK2_BYTES_PER_SECOND * cycles;
+    while (*stream_accum >= cpu_hz) {
+        *stream_accum -= cpu_hz;
+        if (!disk2_advance_data_latch(disk2)) {
+            break;
+        }
     }
 }
 
@@ -742,14 +781,29 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
     case 0x5: disk2_set_phase(disk2, 2, true); break;
     case 0x6: disk2_set_phase(disk2, 3, false); break;
     case 0x7: disk2_set_phase(disk2, 3, true); break;
-    case 0x8: disk2->motor_on = false; break;
-    case 0x9: disk2->motor_on = true; break;
-    case 0xA: disk2->active_drive = 0; disk2->track_cache_valid = false; break;
-    case 0xB: disk2->active_drive = 1; disk2->track_cache_valid = false; break;
+    case 0x8:
+        disk2->motor_on = false;
+        disk2->data_latch = 0x00U;
+        break;
+    case 0x9:
+        disk2->motor_on = true;
+        (void)disk2_sync_data_latch(disk2);
+        break;
+    case 0xA:
+        disk2->active_drive = 0;
+        disk2->track_cache_valid = false;
+        (void)disk2_sync_data_latch(disk2);
+        break;
+    case 0xB:
+        disk2->active_drive = 1;
+        disk2->track_cache_valid = false;
+        (void)disk2_sync_data_latch(disk2);
+        break;
     case 0xC:
         disk2->q6 = false;
         if (!disk2->q7) {
-            return disk2_read_next_byte(disk2);
+            (void)disk2_sync_data_latch(disk2);
+            return disk2->data_latch;
         }
         break;
     case 0xD:

@@ -387,6 +387,7 @@ uint32_t apple2_machine_step_instruction(apple2_machine_t *machine)
 {
     const uint32_t cycles = cpu6502_step(&machine->cpu);
     machine->total_cycles = machine->cpu.total_cycles;
+    apple2_disk2_tick(&machine->disk2, machine->config.cpu_hz, cycles);
     if (machine->config.cpu_hz >= 4U) {
         const uint64_t flash_ticks = machine->total_cycles / (machine->config.cpu_hz / 4U);
         machine->video.flash_state = (flash_ticks & 1U) != 0U;

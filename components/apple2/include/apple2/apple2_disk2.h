@@ -65,6 +65,7 @@ typedef struct {
     int8_t stepper_state[2];
     uint8_t quarter_track[2];
     uint32_t nibble_pos[2];
+    uint32_t stream_accum[2];
     uint8_t data_latch;
     bool track_cache_valid;
     uint8_t track_cache_drive;
@@ -105,4 +106,5 @@ bool apple2_disk2_attach_drive_track_reader(apple2_disk2_t *disk2,
                                             void *context);
 void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index);
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index);
+void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles);
 uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg);
