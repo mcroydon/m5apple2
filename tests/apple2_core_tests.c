@@ -20,6 +20,32 @@ static void test_put_le32(uint8_t *out, uint32_t value)
     out[3] = (uint8_t)(value >> 24);
 }
 
+static uint8_t test_decode44(uint8_t high, uint8_t low)
+{
+    return (uint8_t)(((high & 0x55U) << 1) | (low & 0x55U));
+}
+
+static size_t test_collect_track_sector_headers(const apple2_disk2_t *disk2,
+                                                uint8_t *sectors,
+                                                size_t max_sectors)
+{
+    size_t count = 0;
+
+    for (uint16_t i = 0; (uint16_t)(i + 13U) <= disk2->track_cache_length; ++i) {
+        if (disk2->track_cache[i] == 0xD5U &&
+            disk2->track_cache[i + 1U] == 0xAAU &&
+            disk2->track_cache[i + 2U] == 0x96U) {
+            if (count < max_sectors) {
+                sectors[count] = test_decode44(disk2->track_cache[i + 7U], disk2->track_cache[i + 8U]);
+            }
+            count++;
+            i = (uint16_t)(i + 12U);
+        }
+    }
+
+    return count;
+}
+
 static void fill_reset_vector(apple2_machine_t *machine, uint16_t address)
 {
     machine->memory[0xFFFC] = (uint8_t)(address & 0xFFU);
@@ -627,6 +653,32 @@ static void test_disk2_redundant_switches_do_not_reset_state(void)
     assert(disk2.data_latch == 0xAAU);
 }
 
+static void test_disk2_sector_tracks_keep_dos_interleave(void)
+{
+    static const uint8_t s_expected_track1_order[16] = {
+        0x3, 0x1, 0xE, 0xC, 0xA, 0x8, 0x6, 0x4,
+        0x2, 0xF, 0x0, 0xD, 0xB, 0x9, 0x7, 0x5,
+    };
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+    uint8_t sectors[16];
+
+    memset(image, 0x00, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_drive_with_order(&disk2,
+                                              0,
+                                              image,
+                                              sizeof(image),
+                                              APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL));
+
+    disk2.quarter_track[0] = 4U; /* Track 1. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+
+    assert(disk2.track_cache_valid);
+    assert(test_collect_track_sector_headers(&disk2, sectors, 16U) == 16U);
+    assert(memcmp(sectors, s_expected_track1_order, sizeof(sectors)) == 0);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -646,6 +698,7 @@ int main(void)
     test_woz_loading();
     test_disk2_stepper_quarter_tracks();
     test_disk2_redundant_switches_do_not_reset_state();
+    test_disk2_sector_tracks_keep_dos_interleave();
     puts("apple2 core tests passed");
     return 0;
 }
