@@ -19,11 +19,27 @@
 #include "cardputer/cardputer_display.h"
 #include "cardputer/cardputer_keyboard.h"
 
+#ifndef CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS
+#define CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS 2000
+#endif
+
 static const char *TAG = "m5apple2";
 static apple2_machine_t s_machine;
 static apple2_machine_t s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
+typedef struct {
+    int64_t window_start_us;
+    uint64_t emulated_cycles;
+    uint64_t cpu_step_us;
+    uint64_t frame_compose_us;
+    uint64_t frame_present_us;
+    uint32_t frames_presented;
+    uint32_t text_frames;
+    uint32_t graphics_frames;
+} app_perf_counters_t;
+
+static app_perf_counters_t s_perf;
 
 #ifdef CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
 #define APP_FRAME_INTERVAL_US 33333
@@ -62,6 +78,7 @@ extern const uint8_t dos_3_3_woz_end[] asm("_binary_dos_3_3_woz_end");
 
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
 #define APP_SD_MOUNT_POINT "/sd"
+#define APP_PERF_LOG_INTERVAL_US ((int64_t)CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS * 1000LL)
 
 typedef enum {
     APP_DISK_ORDER_DOS33 = 0,
@@ -1267,6 +1284,52 @@ static bool app_load_drive0_image(void)
 #endif
 }
 
+static void app_perf_reset(int64_t now_us)
+{
+    memset(&s_perf, 0, sizeof(s_perf));
+    s_perf.window_start_us = now_us;
+}
+
+static void app_perf_log_if_due(int64_t now_us)
+{
+    const int64_t elapsed_us = now_us - s_perf.window_start_us;
+
+    if (APP_PERF_LOG_INTERVAL_US <= 0 || elapsed_us < APP_PERF_LOG_INTERVAL_US) {
+        return;
+    }
+
+    {
+        const uint64_t effective_khz =
+            (elapsed_us > 0) ? (s_perf.emulated_cycles * 1000ULL) / (uint64_t)elapsed_us : 0ULL;
+        const uint32_t fps_x10 =
+            (elapsed_us > 0) ? (uint32_t)((uint64_t)s_perf.frames_presented * 10000000ULL / (uint64_t)elapsed_us)
+                             : 0U;
+        const uint32_t cpu_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t compose_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t present_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_present_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+
+        ESP_LOGI(TAG,
+                 "perf apple=%" PRIu64 ".%03" PRIu64 "MHz fps=%" PRIu32 ".%" PRIu32
+                 " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
+                 "%% frames=%" PRIu32 " text=%" PRIu32 " gfx=%" PRIu32,
+                 effective_khz / 1000ULL,
+                 effective_khz % 1000ULL,
+                 fps_x10 / 10U,
+                 fps_x10 % 10U,
+                 cpu_pct,
+                 compose_pct,
+                 present_pct,
+                 s_perf.frames_presented,
+                 s_perf.text_frames,
+                 s_perf.graphics_frames);
+    }
+
+    app_perf_reset(now_us);
+}
+
 void app_main(void)
 {
     apple2_config_t apple2_config = {
@@ -1304,6 +1367,7 @@ void app_main(void)
 
     last_cpu_tick_us = esp_timer_get_time();
     last_frame_tick_us = last_cpu_tick_us;
+    app_perf_reset(last_cpu_tick_us);
 
     while (true) {
         uint8_t ascii = 0;
@@ -1326,31 +1390,53 @@ void app_main(void)
 
         const int64_t now_us = esp_timer_get_time();
         if (rom_loaded) {
+            const uint64_t previous_cycles = s_machine.total_cycles;
             uint64_t budget = (uint64_t)(now_us - last_cpu_tick_us) * apple2_config.cpu_hz / 1000000ULL;
+
             if (budget > (uint64_t)apple2_config.cpu_hz / 10ULL) {
                 budget = (uint64_t)apple2_config.cpu_hz / 10ULL;
             }
             if (budget > 0U) {
+                const int64_t step_start_us = esp_timer_get_time();
                 apple2_machine_step(&s_machine, (uint32_t)budget);
+                s_perf.cpu_step_us += (uint64_t)(esp_timer_get_time() - step_start_us);
+                s_perf.emulated_cycles += s_machine.total_cycles - previous_cycles;
             }
         }
         last_cpu_tick_us = now_us;
 
         if ((now_us - last_frame_tick_us) >= APP_FRAME_INTERVAL_US) {
+            const int64_t compose_start_us = esp_timer_get_time();
             if (s_machine.video.text_mode) {
-                ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
-                                                                        s_machine.memory,
-                                                                        &s_machine.video));
+                s_perf.text_frames++;
+                s_perf.frame_compose_us += (uint64_t)(esp_timer_get_time() - compose_start_us);
+                {
+                    const int64_t present_start_us = esp_timer_get_time();
+
+                    ESP_ERROR_CHECK(cardputer_display_present_apple2_text40(&s_display,
+                                                                            s_machine.memory,
+                                                                            &s_machine.video));
+                    s_perf.frame_present_us += (uint64_t)(esp_timer_get_time() - present_start_us);
+                }
             } else {
                 apple2_machine_render(&s_machine, s_apple2_pixels);
-                ESP_ERROR_CHECK(cardputer_display_present_apple2(&s_display,
-                                                                 s_apple2_pixels,
-                                                                 APPLE2_VIDEO_WIDTH,
-                                                                 APPLE2_VIDEO_HEIGHT));
+                s_perf.graphics_frames++;
+                s_perf.frame_compose_us += (uint64_t)(esp_timer_get_time() - compose_start_us);
+                {
+                    const int64_t present_start_us = esp_timer_get_time();
+
+                    ESP_ERROR_CHECK(cardputer_display_present_apple2(&s_display,
+                                                                     s_apple2_pixels,
+                                                                     APPLE2_VIDEO_WIDTH,
+                                                                     APPLE2_VIDEO_HEIGHT));
+                    s_perf.frame_present_us += (uint64_t)(esp_timer_get_time() - present_start_us);
+                }
             }
+            s_perf.frames_presented++;
             last_frame_tick_us = now_us;
         }
 
+        app_perf_log_if_due(now_us);
         vTaskDelay(pdMS_TO_TICKS(1));
     }
 }

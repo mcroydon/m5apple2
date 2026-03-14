@@ -112,6 +112,10 @@ config M5APPLE2_CPU_HZ
     int "Apple II master CPU clock"
     default 1020484
 
+config M5APPLE2_PERF_LOG_INTERVAL_MS
+    int "Performance log interval (ms)"
+    default 2000
+
 config M5APPLE2_SD_ENABLE
     bool "Enable SD disk library"
     default y
