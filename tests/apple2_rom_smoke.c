@@ -198,6 +198,35 @@ static bool disk_screen_contains(const apple2_machine_t *machine, const char *te
     return false;
 }
 
+static bool disk_screen_has_basic_prompt(const apple2_machine_t *machine)
+{
+    for (uint8_t row = 0; row < 24U; ++row) {
+        if (disk_screen_row_has_prefix(machine, row, "]")) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static void disk_dump_screen(const apple2_machine_t *machine)
+{
+    char row_text[41];
+
+    for (uint8_t row = 0; row < 24U; ++row) {
+        const uint16_t base = apple2_text_row_address(false, row);
+
+        for (uint8_t column = 0; column < 40U; ++column) {
+            bool inverse = false;
+            const uint8_t ascii = apple2_text_code_to_ascii(machine->memory[(uint16_t)(base + column)], &inverse);
+
+            row_text[column] = (ascii >= 32U && ascii <= 126U) ? (char)ascii : '.';
+        }
+        row_text[40] = '\0';
+        fprintf(stderr, "row%02u: %s\n", row, row_text);
+    }
+}
+
 static const char *disk_extension(const char *path)
 {
     const char *extension = strrchr(path, '.');
@@ -229,6 +258,9 @@ int main(void)
     const char *disk_override = getenv("APPLE2_TEST_DISK");
     const char *expected_text = getenv("APPLE2_TEST_EXPECT_TEXT");
     const char *instruction_limit_override = getenv("APPLE2_TEST_INSTRUCTION_LIMIT");
+    const char *boot_command = getenv("APPLE2_TEST_BOOT_COMMAND");
+    const char *dump_screen = getenv("APPLE2_TEST_DUMP_SCREEN");
+    const char *log_dsk_order = getenv("APPLE2_TEST_LOG_DSK_ORDER");
     const char *disk_path = NULL;
     FILE *disk_file = NULL;
     uint8_t rom[0x8000];
@@ -247,6 +279,9 @@ int main(void)
     bool dos_prompt_ready = false;
     bool dos_command_echoed = false;
     bool expected_text_ready = false;
+    bool boot_command_started = false;
+    bool boot_command_finished = false;
+    size_t boot_command_pos = 0;
     uint32_t custom_instruction_limit = CUSTOM_DISK_INSTRUCTIONS;
 
     if (expected_text != NULL && expected_text[0] == '\0') {
@@ -327,6 +362,9 @@ int main(void)
 
         if (disk_type == DISK_IMAGE_DSK_PRODOS_ORDER) {
             disk_type = disk_probe_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size);
+            if (log_dsk_order != NULL && log_dsk_order[0] != '\0') {
+                fprintf(stderr, "probed .dsk order -> type=%d\n", (int)disk_type);
+            }
         }
 
         switch (disk_type) {
@@ -393,6 +431,26 @@ int main(void)
             expected_text_ready = true;
             break;
         }
+        if (expected_text != NULL &&
+            boot_command != NULL &&
+            boot_command[0] != '\0' &&
+            disk_screen_has_basic_prompt(&machine)) {
+            if (!boot_command_started) {
+                boot_command_started = true;
+            }
+
+            if (!boot_command_finished && (machine.key_latch & 0x80U) == 0U) {
+                const char next = boot_command[boot_command_pos];
+
+                if (next != '\0') {
+                    apple2_machine_set_key(&machine, (uint8_t)next);
+                    boot_command_pos++;
+                } else {
+                    apple2_machine_set_key(&machine, '\r');
+                    boot_command_finished = true;
+                }
+            }
+        }
         if (expect_prodos_prompt &&
             cpu.pc >= 0xFD1BU &&
             cpu.pc <= 0xFD24U &&
@@ -429,13 +487,51 @@ int main(void)
         if (!expected_text_ready) {
             const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
             fprintf(stderr,
-                    "Disk boot did not reach expected text \"%s\", pc=%04x qt=%u np=%u row5=%02x row6=%02x\n",
+                    "Disk boot did not reach expected text \"%s\", pc=%04x a=%02x x=%02x y=%02x sp=%02x p=%02x "
+                    "qt=%u np=%u row5=%02x row6=%02x "
+                    "pcbytes=%02x %02x %02x %02x %02x %02x "
+                    "zp44=%02x %02x %02x %02x %02x %02x "
+                    "buf=%02x %02x %02x %02x %02x %02x %02x %02x "
+                    "motor=%u q6=%u q7=%u latch=%02x ready=%u\n",
                     expected_text,
                     cpu.pc,
+                    cpu.a,
+                    cpu.x,
+                    cpu.y,
+                    cpu.sp,
+                    cpu.p,
                     machine.disk2.quarter_track[0],
                     machine.disk2.nibble_pos[0],
                     machine.memory[apple2_text_row_address(false, 5U)],
-                    machine.memory[apple2_text_row_address(false, 6U)]);
+                    machine.memory[apple2_text_row_address(false, 6U)],
+                    machine.memory[cpu.pc],
+                    machine.memory[(uint16_t)(cpu.pc + 1U)],
+                    machine.memory[(uint16_t)(cpu.pc + 2U)],
+                    machine.memory[(uint16_t)(cpu.pc + 3U)],
+                    machine.memory[(uint16_t)(cpu.pc + 4U)],
+                    machine.memory[(uint16_t)(cpu.pc + 5U)],
+                    machine.memory[0x44U],
+                    machine.memory[0x45U],
+                    machine.memory[0x46U],
+                    machine.memory[0x47U],
+                    machine.memory[0x48U],
+                    machine.memory[0x49U],
+                    machine.memory[(uint16_t)(machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8))],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 1U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 2U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 3U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 4U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 5U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 6U)],
+                    machine.memory[(uint16_t)((machine.memory[0x48U] | ((uint16_t)machine.memory[0x49U] << 8)) + 7U)],
+                    machine.disk2.motor_on ? 1 : 0,
+                    machine.disk2.q6 ? 1 : 0,
+                    machine.disk2.q7 ? 1 : 0,
+                    machine.disk2.data_latch,
+                    machine.disk2.data_ready ? 1 : 0);
+            if (dump_screen != NULL && dump_screen[0] != '\0') {
+                disk_dump_screen(&machine);
+            }
             return 14;
         }
 

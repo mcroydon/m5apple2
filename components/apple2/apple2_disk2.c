@@ -7,6 +7,7 @@
 #define APPLE2_DISK2_SECTOR_SIZE 256U
 #define APPLE2_DISK2_MAX_QUARTER_TRACK ((APPLE2_DISK2_TRACKS - 1U) * 4U)
 #define APPLE2_DISK2_BYTES_PER_SECOND 33280U
+#define APPLE2_DISK2_TRACK_SKEW 6U
 
 #define APPLE2_WOZ_HEADER_SIZE 12U
 #define APPLE2_WOZ_CHUNK_HEADER_SIZE 8U
@@ -35,6 +36,11 @@ static const uint8_t s_dos33_track_order[16] = {
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
     0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
+};
+
+static const uint8_t s_physical_track_sequence[16] = {
+    0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7,
+    0x8, 0x9, 0xA, 0xB, 0xC, 0xD, 0xE, 0xF,
 };
 
 static const int8_t s_stepper_state_for_mask[16] = {
@@ -153,7 +159,7 @@ static size_t disk2_append_sector(uint8_t *out, uint8_t volume, uint8_t track, u
             aux[aux_index] |= (uint8_t)(low2 << 4);
         }
     }
-    for (uint8_t i = 0; i < 16U; ++i) {
+    for (uint8_t i = 0; i < 29U; ++i) {
         out[pos++] = 0xFFU;
     }
 
@@ -248,7 +254,8 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
             ? s_dos33_track_order
             : s_prodos_track_order;
     uint8_t boot_track_order[APPLE2_DISK2_SECTORS];
-    const uint8_t *physical_sequence = track_order;
+    uint8_t skewed_track_order[APPLE2_DISK2_SECTORS];
+    const uint8_t *physical_sequence = s_physical_track_sequence;
     uint8_t sector_data[APPLE2_DISK2_SECTOR_SIZE];
     size_t pos = 0;
 
@@ -270,6 +277,14 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
         if (sector0 != NULL && disk2_boot_track_sequence(sector0, track_order, boot_track_order)) {
             physical_sequence = boot_track_order;
         }
+    } else {
+        const uint8_t track_skew = (uint8_t)((track * APPLE2_DISK2_TRACK_SKEW) % APPLE2_DISK2_SECTORS);
+
+        for (uint8_t i = 0; i < APPLE2_DISK2_SECTORS; ++i) {
+            skewed_track_order[i] =
+                s_physical_track_sequence[(uint8_t)((i + track_skew) % APPLE2_DISK2_SECTORS)];
+        }
+        physical_sequence = skewed_track_order;
     }
 
     for (uint8_t order_index = 0; order_index < APPLE2_DISK2_SECTORS; ++order_index) {
