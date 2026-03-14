@@ -2,6 +2,8 @@
 
 #include "apple2/apple2_video.h"
 
+#include <string.h>
+
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
 #include "esp_check.h"
@@ -100,9 +102,49 @@ static void cardputer_display_safe_area(uint16_t panel_width,
 
 static void cardputer_display_clear(uint16_t color)
 {
+    if (color == 0U) {
+        memset(s_framebuffer, 0, sizeof(s_framebuffer));
+        return;
+    }
+
     for (uint32_t i = 0; i < (uint32_t)CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT; ++i) {
         s_framebuffer[i] = color;
     }
+}
+
+static void cardputer_display_prepare_graphics_map(cardputer_display_t *display,
+                                                   uint16_t src_width,
+                                                   uint16_t src_height,
+                                                   uint16_t offset_x,
+                                                   uint16_t offset_y,
+                                                   uint16_t out_width,
+                                                   uint16_t out_height)
+{
+    if (display->graphics_map_valid &&
+        display->graphics_src_width == src_width &&
+        display->graphics_src_height == src_height &&
+        display->graphics_offset_x == offset_x &&
+        display->graphics_offset_y == offset_y &&
+        display->graphics_out_width == out_width &&
+        display->graphics_out_height == out_height) {
+        return;
+    }
+
+    display->graphics_src_width = src_width;
+    display->graphics_src_height = src_height;
+    display->graphics_offset_x = offset_x;
+    display->graphics_offset_y = offset_y;
+    display->graphics_out_width = out_width;
+    display->graphics_out_height = out_height;
+
+    for (uint16_t x = 0; x < out_width; ++x) {
+        display->graphics_src_x[x] = (uint16_t)((uint32_t)x * src_width / out_width);
+    }
+    for (uint16_t y = 0; y < out_height; ++y) {
+        display->graphics_src_y[y] = (uint16_t)((uint32_t)y * src_height / out_height);
+    }
+
+    display->graphics_map_valid = true;
 }
 
 static bool cardputer_display_glyph_group_on(const uint8_t *glyph,
@@ -163,6 +205,7 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
 {
     static bool s_spi_initialized;
 
+    memset(display, 0, sizeof(*display));
     display->native_width = CONFIG_M5APPLE2_LCD_WIDTH;
     display->native_height = CONFIG_M5APPLE2_LCD_HEIGHT;
     ESP_LOGI(TAG,
@@ -411,15 +454,18 @@ esp_err_t cardputer_display_present_apple2(cardputer_display_t *display,
         offset_y = (uint16_t)(safe_y + ((safe_height - out_height) / 2U));
     }
 
-    cardputer_display_clear(apple2_palette_rgb565(APPLE2_COLOR_BLACK));
+    cardputer_display_prepare_graphics_map(display, width, height, offset_x, offset_y, out_width, out_height);
+    if (offset_x != 0U || offset_y != 0U || out_width != dst_width || out_height != dst_height) {
+        cardputer_display_clear(apple2_palette_rgb565(APPLE2_COLOR_BLACK));
+    }
 
     for (uint16_t y = 0; y < out_height; ++y) {
-        const uint16_t src_y = (uint16_t)((uint32_t)y * height / out_height);
+        const uint16_t src_y = display->graphics_src_y[y];
+        uint16_t *dst_row = &s_framebuffer[(uint32_t)(y + offset_y) * dst_width + offset_x];
+        const uint8_t *src_row = &pixels[(size_t)src_y * width];
+
         for (uint16_t x = 0; x < out_width; ++x) {
-            const uint16_t src_x = (uint16_t)((uint32_t)x * width / out_width);
-            const uint16_t dst_index = (uint16_t)((y + offset_y) * dst_width + x + offset_x);
-            const uint8_t color = pixels[(size_t)src_y * width + src_x];
-            s_framebuffer[dst_index] = apple2_palette_rgb565(color);
+            dst_row[x] = apple2_palette_rgb565(src_row[display->graphics_src_x[x]]);
         }
     }
 
