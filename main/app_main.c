@@ -459,6 +459,17 @@ static void app_boot_slot6(void)
     ESP_LOGI(TAG, "Jumped to slot 6 boot ROM");
 }
 
+static void app_reset_and_boot_slot6(bool rom_loaded)
+{
+    apple2_machine_reset(&s_machine);
+    if (!rom_loaded) {
+        app_show_status_screen("PLACE APPLE2PLUS.ROM IN", "roms/ AND REBUILD.", "RUNS WITHOUT ROM SHOW STATUS.");
+        return;
+    }
+
+    app_boot_slot6();
+}
+
 static void app_clear_text_screen(void)
 {
     for (uint8_t row = 0; row < APP_TEXT_ROWS; ++row) {
@@ -2032,6 +2043,8 @@ void app_main(void)
                 app_sd_picker_open(0U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_PICKER2) {
                 app_sd_picker_open(1U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_RESET_BOOT_SLOT6) {
+                app_reset_and_boot_slot6(rom_loaded);
             } else if (ascii == CARDPUTER_INPUT_CMD_BOOT_SLOT6) {
                 app_boot_slot6();
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE1) {
