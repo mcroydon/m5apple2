@@ -418,6 +418,8 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
 
 static uint8_t disk2_read_next_byte(apple2_disk2_t *disk2)
 {
+    uint32_t *nibble_pos;
+
     if (!disk2->motor_on) {
         disk2->data_latch = 0x00U;
         return disk2->data_latch;
@@ -427,9 +429,15 @@ static uint8_t disk2_read_next_byte(apple2_disk2_t *disk2)
         return disk2->data_latch;
     }
 
-    disk2->data_latch = disk2->track_cache[disk2->nibble_pos[disk2->active_drive] % disk2->track_cache_length];
-    disk2->nibble_pos[disk2->active_drive] =
-        (disk2->nibble_pos[disk2->active_drive] + 1U) % disk2->track_cache_length;
+    nibble_pos = &disk2->nibble_pos[disk2->active_drive];
+    if (*nibble_pos >= disk2->track_cache_length) {
+        *nibble_pos = 0U;
+    }
+    disk2->data_latch = disk2->track_cache[*nibble_pos];
+    (*nibble_pos)++;
+    if (*nibble_pos >= disk2->track_cache_length) {
+        *nibble_pos = 0U;
+    }
     return disk2->data_latch;
 }
 

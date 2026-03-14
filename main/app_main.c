@@ -140,6 +140,7 @@ typedef struct {
 #define APP_SD_MAX_IMAGES 16U
 #define APP_SD_PATH_MAX 128U
 #define APP_SD_NAME_MAX 40U
+#define APP_SD_TRACK_BYTES (16U * 256U)
 
 typedef struct {
     char path[APP_SD_PATH_MAX];
@@ -151,6 +152,9 @@ typedef struct {
     FILE *file;
     app_disk_image_type_t type;
     apple2_woz_image_t *woz;
+    bool sector_track_valid;
+    uint8_t sector_track_index;
+    uint8_t *sector_track_data;
 } app_sd_drive_file_t;
 
 static app_builtin_drive_t s_builtin_drives[2];
@@ -708,16 +712,40 @@ static bool app_sd_read_sector(void *context,
                                uint8_t *sector_data)
 {
     app_sd_drive_file_t *drive = context;
-    const long offset = (long)((((size_t)track * 16U) + file_sector) * 256U);
+    const size_t sector_offset = (size_t)file_sector * 256U;
 
     (void)drive_index;
     if (drive == NULL || drive->file == NULL || sector_data == NULL) {
         return false;
     }
-    if (fseek(drive->file, offset, SEEK_SET) != 0) {
+    if (track >= 35U || file_sector >= 16U) {
         return false;
     }
-    return fread(sector_data, 1, 256U, drive->file) == 256U;
+    if (drive->sector_track_data == NULL) {
+        drive->sector_track_data = malloc(APP_SD_TRACK_BYTES);
+        if (drive->sector_track_data == NULL) {
+            drive->sector_track_valid = false;
+            return false;
+        }
+    }
+    if (!drive->sector_track_valid || drive->sector_track_index != track) {
+        const long offset = (long)((size_t)track * APP_SD_TRACK_BYTES);
+
+        if (fseek(drive->file, offset, SEEK_SET) != 0) {
+            drive->sector_track_valid = false;
+            return false;
+        }
+        if (fread(drive->sector_track_data, 1, APP_SD_TRACK_BYTES, drive->file) !=
+            APP_SD_TRACK_BYTES) {
+            drive->sector_track_valid = false;
+            return false;
+        }
+        drive->sector_track_index = track;
+        drive->sector_track_valid = true;
+    }
+
+    memcpy(sector_data, &drive->sector_track_data[sector_offset], 256U);
+    return true;
 }
 
 static bool app_sd_read_track(void *context,
@@ -812,6 +840,9 @@ static void app_sd_close_drive(unsigned drive_index)
         s_sd_drive_files[drive_index].file = NULL;
     }
     s_sd_drive_files[drive_index].type = APP_DISK_IMAGE_NONE;
+    s_sd_drive_files[drive_index].sector_track_valid = false;
+    free(s_sd_drive_files[drive_index].sector_track_data);
+    s_sd_drive_files[drive_index].sector_track_data = NULL;
     free(s_sd_drive_files[drive_index].woz);
     s_sd_drive_files[drive_index].woz = NULL;
 }
@@ -967,6 +998,7 @@ static bool app_sd_probe_file_order(const char *path)
     order = app_probe_dsk_order_source(&source);
 #endif
     fclose(probe.file);
+    free(probe.sector_track_data);
     return order == APP_DISK_ORDER_PRODOS;
 }
 
