@@ -44,11 +44,18 @@ Usage:
   the first SD image into drive 2 when an embedded boot disk is present, or
   the first two SD images into drives 1 and 2 when no embedded disk is built in.
 - On-device SD hotkeys:
+  `Fn+5` opens the drive 1 disk picker,
+  `Fn+6` opens the drive 2 disk picker,
   `Fn+1` cycles drive 1,
   `Fn+2` cycles drive 2,
   `Fn+3` cycles drive 1 `.dsk` order override between `auto`, `DOS`, and `ProDOS`,
   `Fn+4` cycles drive 2 `.dsk` order override between `auto`, `DOS`, and `ProDOS`,
   `Fn+0` rescans the SD card.
+- Inside the disk picker:
+  `I/K` or `Fn+Up/Fn+Down` moves,
+  `Enter` mounts the selected image,
+  `Esc` cancels,
+  and `Fn+5/Fn+6` switches the picker between drive 1 and drive 2.
 - On-device performance hotkey:
   `Fn+8` cycles emulation speed between `1x`, `2x`, and `4x`.
 - On-device Apple II cursor hotkeys:

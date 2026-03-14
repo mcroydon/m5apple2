@@ -45,6 +45,8 @@ static app_perf_counters_t s_perf;
 #define APP_TEXT_ROWS 24U
 #define APP_TEXT_COLUMNS 40U
 #define APP_TEXT_BYTES (APP_TEXT_ROWS * APP_TEXT_COLUMNS)
+#define APP_TEXT_SCREEN_BASE 0x0400U
+#define APP_TEXT_SCREEN_BYTES 0x0800U
 
 typedef struct {
     bool valid;
@@ -173,6 +175,29 @@ static int s_sd_drive_index[2] = { -1, -1 };
 static app_sd_dsk_order_override_t s_sd_dsk_order_override[2];
 static bool s_sd_mounted;
 
+typedef enum {
+    APP_SD_PICKER_ITEM_EJECT = 0,
+    APP_SD_PICKER_ITEM_BUILTIN,
+    APP_SD_PICKER_ITEM_SD,
+} app_sd_picker_item_kind_t;
+
+typedef struct {
+    app_sd_picker_item_kind_t kind;
+    int sd_index;
+} app_sd_picker_item_t;
+
+typedef struct {
+    bool active;
+    uint8_t drive_index;
+    int selected_item;
+    int scroll_item;
+    apple2_video_state_t saved_video;
+    uint8_t saved_text_pages[APP_TEXT_SCREEN_BYTES];
+    char status[APP_TEXT_COLUMNS + 1U];
+} app_sd_picker_t;
+
+static app_sd_picker_t s_sd_picker;
+
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
     0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
@@ -180,6 +205,14 @@ static const uint8_t s_prodos_track_order[16] = {
 
 static const uint8_t s_speed_multipliers[] = { 1U, 2U, 4U };
 static size_t s_speed_multiplier_index;
+
+static bool app_restore_builtin_drive(unsigned drive_index);
+static void app_sd_close_drive(unsigned drive_index);
+static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index);
+static void app_sd_rescan(void);
+static void app_sd_cycle_dsk_order(unsigned drive_index);
+static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t override);
+static void app_text_cache_reset(void);
 
 #if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
 static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
@@ -413,6 +446,364 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
         app_puts_at(12, 2, line3);
     }
     app_puts_at(20, 2, "ESC RESETS THE EMULATOR");
+}
+
+static void app_clear_text_screen(void)
+{
+    for (uint8_t row = 0; row < APP_TEXT_ROWS; ++row) {
+        const uint16_t base = apple2_text_row_address(false, row);
+        for (uint8_t column = 0; column < APP_TEXT_COLUMNS; ++column) {
+            s_machine.memory[(uint16_t)(base + column)] = (uint8_t)(' ' | 0x80U);
+        }
+    }
+}
+
+static void app_sd_picker_set_status(const char *status)
+{
+    if (status == NULL) {
+        s_sd_picker.status[0] = '\0';
+        return;
+    }
+
+    snprintf(s_sd_picker.status, sizeof(s_sd_picker.status), "%s", status);
+}
+
+static size_t app_sd_picker_item_count(unsigned drive_index)
+{
+    size_t count = 1U + s_sd_disk_count;
+
+    if (drive_index < 2U && s_builtin_drives[drive_index].present) {
+        count++;
+    }
+
+    return count;
+}
+
+static app_sd_picker_item_t app_sd_picker_item_for_index(unsigned drive_index, size_t item_index)
+{
+    app_sd_picker_item_t item = {
+        .kind = APP_SD_PICKER_ITEM_EJECT,
+        .sd_index = -1,
+    };
+
+    if (drive_index < 2U && s_builtin_drives[drive_index].present) {
+        if (item_index == 0U) {
+            item.kind = APP_SD_PICKER_ITEM_BUILTIN;
+            return item;
+        }
+        item_index--;
+    }
+
+    if (item_index == 0U) {
+        return item;
+    }
+
+    item_index--;
+    if (item_index < s_sd_disk_count) {
+        item.kind = APP_SD_PICKER_ITEM_SD;
+        item.sd_index = (int)item_index;
+    }
+    return item;
+}
+
+static int app_sd_picker_selection_for_current_drive(unsigned drive_index)
+{
+    int selection = 0;
+
+    if (drive_index >= 2U) {
+        return 0;
+    }
+    if (s_builtin_drives[drive_index].present) {
+        if (s_sd_drive_index[drive_index] < 0 && apple2_disk2_drive_loaded(&s_machine.disk2, drive_index)) {
+            return 0;
+        }
+        selection = 1;
+    }
+    if (s_sd_drive_index[drive_index] >= 0) {
+        selection += 1 + s_sd_drive_index[drive_index];
+    }
+    return selection;
+}
+
+static bool app_sd_picker_item_is_current(unsigned drive_index, app_sd_picker_item_t item)
+{
+    if (drive_index >= 2U) {
+        return false;
+    }
+
+    switch (item.kind) {
+    case APP_SD_PICKER_ITEM_BUILTIN:
+        return s_sd_drive_index[drive_index] < 0 &&
+               s_builtin_drives[drive_index].present &&
+               apple2_disk2_drive_loaded(&s_machine.disk2, drive_index);
+    case APP_SD_PICKER_ITEM_EJECT:
+        return s_sd_drive_index[drive_index] < 0 &&
+               !apple2_disk2_drive_loaded(&s_machine.disk2, drive_index);
+    case APP_SD_PICKER_ITEM_SD:
+        return s_sd_drive_index[drive_index] == item.sd_index;
+    default:
+        return false;
+    }
+}
+
+static void app_sd_picker_format_item(unsigned drive_index,
+                                      app_sd_picker_item_t item,
+                                      char *buffer,
+                                      size_t buffer_size)
+{
+    switch (item.kind) {
+    case APP_SD_PICKER_ITEM_BUILTIN:
+        snprintf(buffer,
+                 buffer_size,
+                 "EMBEDDED: %s",
+                 s_builtin_drives[drive_index].label);
+        break;
+    case APP_SD_PICKER_ITEM_SD:
+        if (item.sd_index >= 0 && (size_t)item.sd_index < s_sd_disk_count) {
+            snprintf(buffer,
+                     buffer_size,
+                     "%s",
+                     s_sd_disks[item.sd_index].name);
+        } else {
+            snprintf(buffer, buffer_size, "INVALID SD ENTRY");
+        }
+        break;
+    case APP_SD_PICKER_ITEM_EJECT:
+    default:
+        snprintf(buffer, buffer_size, "EJECT DRIVE");
+        break;
+    }
+}
+
+static void app_sd_picker_sync_scroll(void)
+{
+    const int list_rows = 15;
+    const int item_count = (int)app_sd_picker_item_count(s_sd_picker.drive_index);
+
+    if (item_count <= 0) {
+        s_sd_picker.selected_item = 0;
+        s_sd_picker.scroll_item = 0;
+        return;
+    }
+    if (s_sd_picker.selected_item < 0) {
+        s_sd_picker.selected_item = 0;
+    } else if (s_sd_picker.selected_item >= item_count) {
+        s_sd_picker.selected_item = item_count - 1;
+    }
+    if (s_sd_picker.scroll_item > s_sd_picker.selected_item) {
+        s_sd_picker.scroll_item = s_sd_picker.selected_item;
+    }
+    if ((s_sd_picker.scroll_item + list_rows) <= s_sd_picker.selected_item) {
+        s_sd_picker.scroll_item = s_sd_picker.selected_item - list_rows + 1;
+    }
+    if (s_sd_picker.scroll_item < 0) {
+        s_sd_picker.scroll_item = 0;
+    }
+    if (item_count > list_rows && s_sd_picker.scroll_item > (item_count - list_rows)) {
+        s_sd_picker.scroll_item = item_count - list_rows;
+    }
+}
+
+static void app_sd_picker_render(void)
+{
+    char line[APP_TEXT_COLUMNS + 1U];
+    const unsigned drive = (unsigned)s_sd_picker.drive_index;
+    const size_t item_count = app_sd_picker_item_count(drive);
+    const int list_rows = 15;
+
+    app_clear_text_screen();
+    s_machine.video.text_mode = true;
+    s_machine.video.mixed_mode = false;
+    s_machine.video.page2 = false;
+    s_machine.video.hires_mode = false;
+
+    snprintf(line, sizeof(line), "SD DISK PICKER DRIVE %u", drive + 1U);
+    app_puts_at(0, 0, line);
+    app_puts_at(1, 0, "I/K MOVE  ENTER SELECT");
+    app_puts_at(2, 0, "ESC CANCEL  FN+0 RESCAN");
+    app_puts_at(3, 0, "FN+3/4 ORDER  FN+5/6 DRIVE");
+
+    if (s_sd_drive_index[drive] >= 0 && (size_t)s_sd_drive_index[drive] < s_sd_disk_count) {
+        snprintf(line, sizeof(line), "CURRENT: %s", s_sd_disks[s_sd_drive_index[drive]].name);
+    } else if (s_builtin_drives[drive].present && apple2_disk2_drive_loaded(&s_machine.disk2, drive)) {
+        snprintf(line, sizeof(line), "CURRENT: %s", s_builtin_drives[drive].label);
+    } else {
+        snprintf(line, sizeof(line), "CURRENT: EMPTY");
+    }
+    app_puts_at(5, 0, line);
+
+    snprintf(line,
+             sizeof(line),
+             "DSK ORDER: %s",
+             app_sd_dsk_order_override_name(s_sd_dsk_order_override[drive]));
+    app_puts_at(6, 0, line);
+
+    for (int row = 0; row < list_rows; ++row) {
+        const int item_index = s_sd_picker.scroll_item + row;
+
+        if ((size_t)item_index >= item_count) {
+            break;
+        }
+
+        {
+            const app_sd_picker_item_t item = app_sd_picker_item_for_index(drive, (size_t)item_index);
+            char item_label[APP_TEXT_COLUMNS + 1U];
+            const bool selected = item_index == s_sd_picker.selected_item;
+            const bool current = app_sd_picker_item_is_current(drive, item);
+
+            app_sd_picker_format_item(drive, item, item_label, sizeof(item_label));
+            snprintf(line,
+                     sizeof(line),
+                     "%c%c %-36.36s",
+                     selected ? '>' : ' ',
+                     current ? '*' : ' ',
+                     item_label);
+            app_puts_at((uint8_t)(8 + row), 0, line);
+        }
+    }
+
+    if (item_count > (size_t)list_rows) {
+        snprintf(line,
+                 sizeof(line),
+                 "ITEM %d/%u",
+                 s_sd_picker.selected_item + 1,
+                 (unsigned)item_count);
+        app_puts_at(23, 0, line);
+    }
+    if (s_sd_picker.status[0] != '\0') {
+        app_puts_at(23, 14, s_sd_picker.status);
+    }
+
+    app_text_cache_reset();
+}
+
+static void app_sd_picker_close(void)
+{
+    memcpy(&s_machine.memory[APP_TEXT_SCREEN_BASE],
+           s_sd_picker.saved_text_pages,
+           APP_TEXT_SCREEN_BYTES);
+    s_machine.video = s_sd_picker.saved_video;
+    memset(&s_sd_picker, 0, sizeof(s_sd_picker));
+    app_text_cache_reset();
+}
+
+static bool app_sd_picker_apply_selection(void)
+{
+    const unsigned drive = (unsigned)s_sd_picker.drive_index;
+    const app_sd_picker_item_t item =
+        app_sd_picker_item_for_index(drive, (size_t)s_sd_picker.selected_item);
+
+    switch (item.kind) {
+    case APP_SD_PICKER_ITEM_BUILTIN:
+        app_sd_close_drive(drive);
+        s_sd_drive_index[drive] = -1;
+        if (app_restore_builtin_drive(drive)) {
+            ESP_LOGI(TAG,
+                     "Restored embedded disk in drive %u (%s)",
+                     drive + 1U,
+                     s_builtin_drives[drive].label);
+            return true;
+        }
+        app_sd_picker_set_status("RESTORE FAILED");
+        return false;
+    case APP_SD_PICKER_ITEM_SD:
+        if (item.sd_index >= 0 && app_sd_mount_disk(drive, (size_t)item.sd_index)) {
+            return true;
+        }
+        app_sd_picker_set_status("MOUNT FAILED");
+        return false;
+    case APP_SD_PICKER_ITEM_EJECT:
+    default:
+        app_sd_close_drive(drive);
+        s_sd_drive_index[drive] = -1;
+        apple2_disk2_unload_drive(&s_machine.disk2, drive);
+        ESP_LOGI(TAG, "Ejected drive %u", drive + 1U);
+        return true;
+    }
+}
+
+static void app_sd_picker_open(unsigned drive_index)
+{
+    if (drive_index >= 2U) {
+        return;
+    }
+
+    memcpy(s_sd_picker.saved_text_pages,
+           &s_machine.memory[APP_TEXT_SCREEN_BASE],
+           APP_TEXT_SCREEN_BYTES);
+    s_sd_picker.saved_video = s_machine.video;
+    s_sd_picker.active = true;
+    s_sd_picker.drive_index = (uint8_t)drive_index;
+    s_sd_picker.selected_item = app_sd_picker_selection_for_current_drive(drive_index);
+    s_sd_picker.scroll_item = 0;
+    app_sd_picker_set_status(NULL);
+    app_sd_picker_sync_scroll();
+    app_sd_picker_render();
+}
+
+static void app_sd_picker_switch_drive(unsigned drive_index)
+{
+    if (!s_sd_picker.active || drive_index >= 2U) {
+        return;
+    }
+
+    s_sd_picker.drive_index = (uint8_t)drive_index;
+    s_sd_picker.selected_item = app_sd_picker_selection_for_current_drive(drive_index);
+    s_sd_picker.scroll_item = 0;
+    app_sd_picker_set_status(NULL);
+    app_sd_picker_sync_scroll();
+    app_sd_picker_render();
+}
+
+static void app_sd_picker_handle_input(uint8_t ascii)
+{
+    switch (ascii) {
+    case 0x1BU:
+        app_sd_picker_close();
+        return;
+    case '\r':
+        if (app_sd_picker_apply_selection()) {
+            app_sd_picker_close();
+        } else {
+            app_sd_picker_render();
+        }
+        return;
+    case 'i':
+    case 'I':
+    case 0x0BU:
+        s_sd_picker.selected_item--;
+        break;
+    case 'k':
+    case 'K':
+    case 0x0AU:
+        s_sd_picker.selected_item++;
+        break;
+    case CARDPUTER_INPUT_CMD_SD_RESCAN:
+        app_sd_rescan();
+        s_sd_picker.selected_item = app_sd_picker_selection_for_current_drive(s_sd_picker.drive_index);
+        s_sd_picker.scroll_item = 0;
+        app_sd_picker_set_status("RESCANNED");
+        break;
+    case CARDPUTER_INPUT_CMD_SD_ORDER1:
+        app_sd_cycle_dsk_order(0U);
+        app_sd_picker_set_status("DRIVE 1 ORDER");
+        break;
+    case CARDPUTER_INPUT_CMD_SD_ORDER2:
+        app_sd_cycle_dsk_order(1U);
+        app_sd_picker_set_status("DRIVE 2 ORDER");
+        break;
+    case CARDPUTER_INPUT_CMD_SD_PICKER1:
+        app_sd_picker_switch_drive(0U);
+        return;
+    case CARDPUTER_INPUT_CMD_SD_PICKER2:
+        app_sd_picker_switch_drive(1U);
+        return;
+    default:
+        return;
+    }
+
+    app_sd_picker_sync_scroll();
+    app_sd_picker_render();
 }
 
 static void app_text_cache_reset(void)
@@ -1624,7 +2015,13 @@ void app_main(void)
     while (true) {
         uint8_t ascii = 0;
         if (cardputer_keyboard_poll_ascii(&ascii)) {
-            if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE1) {
+            if (s_sd_picker.active) {
+                app_sd_picker_handle_input(ascii);
+            } else if (ascii == CARDPUTER_INPUT_CMD_SD_PICKER1) {
+                app_sd_picker_open(0U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_SD_PICKER2) {
+                app_sd_picker_open(1U);
+            } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE1) {
                 app_sd_cycle_drive(0U);
             } else if (ascii == CARDPUTER_INPUT_CMD_SD_DRIVE2) {
                 app_sd_cycle_drive(1U);
@@ -1647,7 +2044,7 @@ void app_main(void)
         }
 
         const int64_t now_us = esp_timer_get_time();
-        if (rom_loaded) {
+        if (rom_loaded && !s_sd_picker.active) {
             const uint64_t target_cpu_hz =
                 (uint64_t)apple2_config.cpu_hz * (uint64_t)app_speed_multiplier();
             const uint32_t max_step_slice_cycles =
@@ -1727,7 +2124,9 @@ void app_main(void)
         }
 
         app_perf_log_if_due(now_us);
-        if (cpu_cycle_credit < (uint64_t)(((uint64_t)apple2_config.cpu_hz / 120ULL) > 1024ULL
+        if (s_sd_picker.active) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        } else if (cpu_cycle_credit < (uint64_t)(((uint64_t)apple2_config.cpu_hz / 120ULL) > 1024ULL
                                               ? (uint32_t)((uint64_t)apple2_config.cpu_hz / 120ULL)
                                               : 1024U) &&
             app_speed_multiplier() == 1U &&

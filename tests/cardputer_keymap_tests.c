@@ -133,6 +133,16 @@ static void test_fn_disk_commands(void)
                                             (cardputer_keycoord_t){ .row = 0U, .column = 8U },
                                             &ascii));
     assert(ascii == CARDPUTER_INPUT_CMD_SPEED_TOGGLE);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 5),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 5U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_PICKER1);
+
+    assert(cardputer_keymap_ascii_for_press(mask_for(2, 0) | mask_for(0, 6),
+                                            (cardputer_keycoord_t){ .row = 0U, .column = 6U },
+                                            &ascii));
+    assert(ascii == CARDPUTER_INPUT_CMD_SD_PICKER2);
 }
 
 static void test_fn_arrow_commands(void)

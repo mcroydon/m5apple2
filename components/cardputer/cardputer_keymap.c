@@ -136,6 +136,12 @@ static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
     case '4':
         *ascii = CARDPUTER_INPUT_CMD_SD_ORDER2;
         return true;
+    case '5':
+        *ascii = CARDPUTER_INPUT_CMD_SD_PICKER1;
+        return true;
+    case '6':
+        *ascii = CARDPUTER_INPUT_CMD_SD_PICKER2;
+        return true;
     case '8':
         *ascii = CARDPUTER_INPUT_CMD_SPEED_TOGGLE;
         return true;
