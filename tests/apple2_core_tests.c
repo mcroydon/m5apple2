@@ -593,6 +593,40 @@ static void test_disk2_stepper_quarter_tracks(void)
     assert(machine.disk2.quarter_track[0] == 0U);
 }
 
+static void test_disk2_redundant_switches_do_not_reset_state(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_NIB_IMAGE_SIZE];
+
+    memset(image, 0x80, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_nib_drive(&disk2, 0, image, sizeof(image)));
+    assert(apple2_disk2_load_nib_drive(&disk2, 1, image, sizeof(image)));
+
+    disk2.motor_on = true;
+    disk2.active_drive = 0U;
+    disk2.track_cache_valid = true;
+    disk2.track_cache_drive = 0U;
+    disk2.track_cache_key = 0U;
+    disk2.track_cache_length = APPLE2_DISK2_NIB_TRACK_BYTES;
+    disk2.stream_accum[0] = 1234U;
+    disk2.data_ready = true;
+    disk2.data_latch = 0xAAU;
+
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.motor_on);
+    assert(disk2.stream_accum[0] == 1234U);
+    assert(disk2.data_ready);
+    assert(disk2.data_latch == 0xAAU);
+
+    (void)apple2_disk2_access(&disk2, 0xAU);
+    assert(disk2.active_drive == 0U);
+    assert(disk2.track_cache_valid);
+    assert(disk2.stream_accum[0] == 1234U);
+    assert(disk2.data_ready);
+    assert(disk2.data_latch == 0xAAU);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -611,6 +645,7 @@ int main(void)
     test_track_reader_loading();
     test_woz_loading();
     test_disk2_stepper_quarter_tracks();
+    test_disk2_redundant_switches_do_not_reset_state();
     puts("apple2 core tests passed");
     return 0;
 }

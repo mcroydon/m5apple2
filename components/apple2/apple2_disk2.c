@@ -837,27 +837,35 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
     case 0x6: disk2_set_phase(disk2, 3, false); break;
     case 0x7: disk2_set_phase(disk2, 3, true); break;
     case 0x8:
-        disk2->motor_on = false;
-        disk2->stream_accum[disk2->active_drive] = 0U;
-        disk2->data_ready = false;
-        disk2->data_latch = 0x00U;
+        if (disk2->motor_on) {
+            disk2->motor_on = false;
+            disk2->stream_accum[disk2->active_drive] = 0U;
+            disk2->data_ready = false;
+            disk2->data_latch = 0x00U;
+        }
         break;
     case 0x9:
-        disk2->motor_on = true;
-        disk2->stream_accum[disk2->active_drive] = 0U;
-        (void)disk2_latch_current_byte(disk2);
+        if (!disk2->motor_on) {
+            disk2->motor_on = true;
+            disk2->stream_accum[disk2->active_drive] = 0U;
+            (void)disk2_latch_current_byte(disk2);
+        }
         break;
     case 0xA:
-        disk2->active_drive = 0;
-        disk2->track_cache_valid = false;
-        disk2->stream_accum[disk2->active_drive] = 0U;
-        (void)disk2_latch_current_byte(disk2);
+        if (disk2->active_drive != 0U) {
+            disk2->active_drive = 0;
+            disk2->track_cache_valid = false;
+            disk2->stream_accum[disk2->active_drive] = 0U;
+            (void)disk2_latch_current_byte(disk2);
+        }
         break;
     case 0xB:
-        disk2->active_drive = 1;
-        disk2->track_cache_valid = false;
-        disk2->stream_accum[disk2->active_drive] = 0U;
-        (void)disk2_latch_current_byte(disk2);
+        if (disk2->active_drive != 1U) {
+            disk2->active_drive = 1;
+            disk2->track_cache_valid = false;
+            disk2->stream_accum[disk2->active_drive] = 0U;
+            (void)disk2_latch_current_byte(disk2);
+        }
         break;
     case 0xC:
         disk2->q6 = false;
