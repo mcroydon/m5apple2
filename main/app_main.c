@@ -1393,6 +1393,9 @@ void app_main(void)
     bool drive0_loaded = false;
     int64_t last_cpu_tick_us;
     int64_t last_frame_tick_us;
+    uint64_t cpu_cycle_credit = 0U;
+    const uint32_t max_step_slice_cycles =
+        (apple2_config.cpu_hz / 240U) > 256U ? (apple2_config.cpu_hz / 240U) : 256U;
 
     apple2_machine_init(&s_machine, &apple2_config);
 
@@ -1444,17 +1447,35 @@ void app_main(void)
 
         const int64_t now_us = esp_timer_get_time();
         if (rom_loaded) {
-            const uint64_t previous_cycles = s_machine.total_cycles;
-            uint64_t budget = (uint64_t)(now_us - last_cpu_tick_us) * apple2_config.cpu_hz / 1000000ULL;
+            const uint64_t elapsed_credit =
+                (uint64_t)(now_us - last_cpu_tick_us) * apple2_config.cpu_hz / 1000000ULL;
 
-            if (budget > (uint64_t)apple2_config.cpu_hz / 10ULL) {
-                budget = (uint64_t)apple2_config.cpu_hz / 10ULL;
+            cpu_cycle_credit += elapsed_credit;
+            if (cpu_cycle_credit > (uint64_t)apple2_config.cpu_hz / 10ULL) {
+                cpu_cycle_credit = (uint64_t)apple2_config.cpu_hz / 10ULL;
             }
-            if (budget > 0U) {
+            if (cpu_cycle_credit > 0U) {
                 const int64_t step_start_us = esp_timer_get_time();
-                apple2_machine_step(&s_machine, (uint32_t)budget);
+                unsigned step_slices = 0U;
+
+                while (cpu_cycle_credit > 0U && step_slices < 8U) {
+                    const uint32_t budget = (cpu_cycle_credit > max_step_slice_cycles)
+                                                ? max_step_slice_cycles
+                                                : (uint32_t)cpu_cycle_credit;
+                    const uint64_t previous_cycles = s_machine.total_cycles;
+                    uint64_t executed_cycles;
+
+                    apple2_machine_step(&s_machine, budget);
+                    executed_cycles = s_machine.total_cycles - previous_cycles;
+                    s_perf.emulated_cycles += executed_cycles;
+                    if (executed_cycles >= cpu_cycle_credit) {
+                        cpu_cycle_credit = 0U;
+                    } else {
+                        cpu_cycle_credit -= executed_cycles;
+                    }
+                    step_slices++;
+                }
                 s_perf.cpu_step_us += (uint64_t)(esp_timer_get_time() - step_start_us);
-                s_perf.emulated_cycles += s_machine.total_cycles - previous_cycles;
             }
         }
         last_cpu_tick_us = now_us;
@@ -1497,10 +1518,15 @@ void app_main(void)
                 app_text_cache_mark_hidden();
                 s_perf.frames_presented++;
             }
-            last_frame_tick_us = now_us;
+            last_frame_tick_us += ((now_us - last_frame_tick_us) / APP_FRAME_INTERVAL_US) * APP_FRAME_INTERVAL_US;
         }
 
         app_perf_log_if_due(now_us);
-        vTaskDelay(pdMS_TO_TICKS(1));
+        if (cpu_cycle_credit < (uint64_t)max_step_slice_cycles &&
+            (last_frame_tick_us + APP_FRAME_INTERVAL_US - now_us) > 2000LL) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        } else {
+            taskYIELD();
+        }
     }
 }
