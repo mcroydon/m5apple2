@@ -173,6 +173,11 @@ static int s_sd_drive_index[2] = { -1, -1 };
 static app_sd_dsk_order_override_t s_sd_dsk_order_override[2];
 static bool s_sd_mounted;
 
+static const uint8_t s_prodos_track_order[16] = {
+    0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
+    0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
+};
+
 static const uint8_t s_speed_multipliers[] = { 1U, 2U, 4U };
 static size_t s_speed_multiplier_index;
 
@@ -188,6 +193,68 @@ static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_
     }
 
     return nonzero;
+}
+
+static unsigned app_find_file_sector_for_physical(const uint8_t *track_order, uint8_t physical_sector)
+{
+    for (unsigned file_sector = 0; file_sector < 16U; ++file_sector) {
+        if (track_order[file_sector] == physical_sector) {
+            return file_sector;
+        }
+    }
+
+    return 0U;
+}
+
+static bool app_probe_read_sector_source(const app_disk_source_t *source,
+                                         uint8_t track,
+                                         uint8_t file_sector,
+                                         uint8_t *sector_data)
+{
+    if (source->kind == APP_DISK_SOURCE_READER) {
+        return source->read_sector != NULL &&
+               source->read_sector(source->context, 0U, track, file_sector, sector_data);
+    }
+
+    if (source->image == NULL || source->image_size != APPLE2_DISK2_IMAGE_SIZE) {
+        return false;
+    }
+
+    memcpy(sector_data,
+           &source->image[(((size_t)track * 16U) + file_sector) * 256U],
+           256U);
+    return true;
+}
+
+static unsigned app_stage1_preload_match_score_source(const apple2_machine_t *machine,
+                                                      const app_disk_source_t *source,
+                                                      app_disk_order_t order)
+{
+    static const uint8_t s_boot_track_physical_sectors[10] = {
+        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
+    };
+    unsigned matched_bytes = 0U;
+    uint8_t sector_data[256];
+
+    for (unsigned sector = 0; sector < 10U; ++sector) {
+        const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
+        unsigned file_sector = sector;
+
+        if (order == APP_DISK_ORDER_PRODOS) {
+            file_sector =
+                app_find_file_sector_for_physical(s_prodos_track_order, s_boot_track_physical_sectors[sector]);
+        }
+        if (!app_probe_read_sector_source(source, 0U, (uint8_t)file_sector, sector_data)) {
+            return 0U;
+        }
+        for (unsigned byte_index = 0; byte_index < 256U; ++byte_index) {
+            if (machine->memory[(uint16_t)(address + byte_index)] == sector_data[byte_index]) {
+                matched_bytes++;
+            }
+        }
+    }
+
+    return matched_bytes;
 }
 
 static bool app_attach_probe_drive(apple2_machine_t *probe,
@@ -254,10 +321,15 @@ static int app_score_dsk_order_source(const app_disk_source_t *source, app_disk_
 
     {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(probe);
+        const unsigned preload_match_score = app_stage1_preload_match_score_source(probe, source, order);
         int score = 0;
 
         score += (int)app_count_nonzero_range(probe, 0x1D00U, 0x0400U);
         score += (int)app_count_nonzero_range(probe, 0x2A00U, 0x0100U);
+        score += (int)preload_match_score;
+        if (preload_match_score == (10U * 256U)) {
+            score += 1024;
+        }
         if (probe->disk2.nibble_pos[0] > 384U) {
             score += 512;
         }
@@ -286,7 +358,7 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
     const int prodos_score = app_score_dsk_order_source(source, APP_DISK_ORDER_PRODOS);
 
     ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d", dos_score, prodos_score);
-    return (prodos_score > dos_score) ? APP_DISK_ORDER_PRODOS : APP_DISK_ORDER_DOS33;
+    return (prodos_score >= dos_score) ? APP_DISK_ORDER_PRODOS : APP_DISK_ORDER_DOS33;
 }
 
 #ifdef M5APPLE2_HAS_DOS33_DSK

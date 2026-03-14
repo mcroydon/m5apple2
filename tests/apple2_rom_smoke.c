@@ -49,6 +49,36 @@ static unsigned disk_find_file_sector_for_physical(const uint8_t *track_order, u
     return 0U;
 }
 
+static unsigned disk_stage1_preload_match_score(const apple2_machine_t *machine,
+                                                const uint8_t *disk,
+                                                disk_image_type_t image_type)
+{
+    static const uint8_t s_boot_track_physical_sectors[10] = {
+        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1, 0xE, 0xC,
+    };
+    unsigned matched_bytes = 0U;
+
+    for (unsigned sector = 0; sector < 10U; ++sector) {
+        const uint16_t address = (uint16_t)(0x3600U + sector * 0x0100U);
+        unsigned file_sector = sector;
+
+        if (image_type == DISK_IMAGE_PO_PRODOS_ORDER ||
+            image_type == DISK_IMAGE_DSK_PRODOS_ORDER) {
+            file_sector =
+                disk_find_file_sector_for_physical(s_prodos_track_order, s_boot_track_physical_sectors[sector]);
+        }
+
+        for (unsigned byte_index = 0; byte_index < 256U; ++byte_index) {
+            if (machine->memory[(uint16_t)(address + byte_index)] ==
+                disk[(size_t)file_sector * 0x0100U + byte_index]) {
+                matched_bytes++;
+            }
+        }
+    }
+
+    return matched_bytes;
+}
+
 static int disk_score_dsk_order(const uint8_t *rom,
                                 size_t rom_size,
                                 const uint8_t *slot6_rom,
@@ -90,10 +120,19 @@ static int disk_score_dsk_order(const uint8_t *rom,
 
     {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
+        const unsigned preload_match_score =
+            disk_stage1_preload_match_score(&probe,
+                                            disk,
+                                            prodos_order ? DISK_IMAGE_DSK_PRODOS_ORDER
+                                                         : DISK_IMAGE_DSK_DOS_ORDER);
         int score = 0;
 
         score += (int)disk_count_nonzero_range(&probe, 0x1D00U, 0x0400U);
         score += (int)disk_count_nonzero_range(&probe, 0x2A00U, 0x0100U);
+        score += (int)preload_match_score;
+        if (preload_match_score == (10U * 256U)) {
+            score += 1024;
+        }
         if (probe.disk2.nibble_pos[0] > 384U) {
             score += 512;
         }
@@ -126,7 +165,7 @@ static disk_image_type_t disk_probe_dsk_order(const uint8_t *rom,
     const int dos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, false);
     const int prodos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, true);
 
-    return (prodos_score > dos_score) ? DISK_IMAGE_DSK_PRODOS_ORDER : DISK_IMAGE_DSK_DOS_ORDER;
+    return (prodos_score >= dos_score) ? DISK_IMAGE_DSK_PRODOS_ORDER : DISK_IMAGE_DSK_DOS_ORDER;
 }
 
 static bool disk_stage1_preload_complete(const apple2_machine_t *machine,
