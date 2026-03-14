@@ -58,6 +58,7 @@ typedef struct {
     apple2_disk2_read_track_fn read_track[2];
     void *read_track_context[2];
     bool motor_on;
+    bool data_ready;
     uint8_t active_drive;
     bool q6;
     bool q7;
