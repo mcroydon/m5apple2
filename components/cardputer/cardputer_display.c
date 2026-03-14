@@ -173,7 +173,7 @@ static bool cardputer_display_text_row_active(const uint8_t *memory,
     for (uint8_t column = 0; column < 40U; ++column) {
         bool inverse = false;
         const uint8_t code = memory[(uint16_t)(row_address + column)];
-        const bool flashing = apple2_text_code_is_flashing(code) && state->flash_state;
+        const bool flashing = apple2_text_code_is_flashing(code);
         const uint8_t ascii = apple2_text_code_to_ascii(code, &inverse);
 
         if (ascii != ' ' || inverse || flashing) {
