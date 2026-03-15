@@ -270,6 +270,8 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
     uint8_t sector_data[APPLE2_DISK2_SECTOR_SIZE];
     size_t pos = 0;
 
+    disk2->profile.sector_track_builds++;
+
     if (track == 0U) {
         const uint8_t *sector0 = NULL;
 
@@ -282,6 +284,7 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
                                             0U,
                                             0U,
                                             sector_data)) {
+            disk2->profile.sector_reader_calls++;
             sector0 = sector_data;
         }
 
@@ -308,6 +311,7 @@ static bool disk2_build_sector_track_cache(apple2_disk2_t *disk2, uint8_t drive,
             source = &disk2->image[drive][sector_offset];
         } else if (disk2->source_kind[drive] == APPLE2_DISK2_SOURCE_SECTOR_READER &&
                    disk2->read_sector[drive] != NULL) {
+            disk2->profile.sector_reader_calls++;
             if (!disk2->read_sector[drive](disk2->read_sector_context[drive],
                                            drive,
                                            track,
@@ -353,8 +357,11 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
     if (disk2->track_cache_valid &&
         disk2->track_cache_drive == drive &&
         disk2->track_cache_key == cache_key) {
+        disk2->profile.track_cache_hits++;
         return true;
     }
+
+    disk2->profile.track_cache_misses++;
 
     switch (disk2->source_kind[drive]) {
     case APPLE2_DISK2_SOURCE_SECTOR_IMAGE:
@@ -385,6 +392,7 @@ static bool disk2_build_track_cache(apple2_disk2_t *disk2)
             return false;
         }
 
+        disk2->profile.track_reader_calls++;
         disk2->track_cache_valid = true;
         disk2->track_cache_drive = drive;
         disk2->track_cache_key = cache_key;
@@ -423,6 +431,7 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
                 const uint8_t delta = (uint8_t)((new_state - old_state) & 0x07U);
 
                     if (delta != 0U && delta != 4U) {
+                        disk2->profile.phase_transitions++;
                         if (delta < 4U) {
                             uint8_t steps = delta;
                             while (steps-- != 0U && *quarter_track < APPLE2_DISK2_MAX_QUARTER_TRACK) {
@@ -501,6 +510,7 @@ static bool disk2_advance_data_latch(apple2_disk2_t *disk2)
     if (*nibble_pos >= disk2->track_cache_length) {
         *nibble_pos = 0U;
     }
+    disk2->profile.bytes_latched++;
     return disk2_latch_current_byte(disk2);
 }
 
@@ -800,6 +810,8 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
         !disk2->loaded[disk2->active_drive]) {
         return;
     }
+    disk2->profile.tick_calls++;
+    disk2->profile.tick_cycles += cycles;
     if (!disk2_prepare_track(disk2)) {
         return;
     }
@@ -841,6 +853,7 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
     case 0x9:
         if (!disk2->motor_on) {
             disk2->motor_on = true;
+            disk2->profile.motor_starts++;
             disk2->stream_accum[disk2->active_drive] = 0U;
             (void)disk2_latch_current_byte(disk2);
         }
@@ -848,6 +861,7 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
     case 0xA:
         if (disk2->active_drive != 0U) {
             disk2->active_drive = 0;
+            disk2->profile.drive_switches++;
             disk2->track_cache_valid = false;
             disk2->stream_accum[disk2->active_drive] = 0U;
             (void)disk2_latch_current_byte(disk2);
@@ -856,6 +870,7 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
     case 0xB:
         if (disk2->active_drive != 1U) {
             disk2->active_drive = 1;
+            disk2->profile.drive_switches++;
             disk2->track_cache_valid = false;
             disk2->stream_accum[disk2->active_drive] = 0U;
             (void)disk2_latch_current_byte(disk2);

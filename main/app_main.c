@@ -34,10 +34,21 @@ typedef struct {
     uint64_t cpu_step_us;
     uint64_t frame_compose_us;
     uint64_t frame_present_us;
+    uint64_t sd_sector_read_us;
+    uint64_t sd_track_read_us;
+    uint64_t dsk_probe_us;
+    uint64_t sd_mount_us;
+    uint64_t instruction_base;
+    apple2_disk2_profile_t disk2_profile_base;
     uint32_t frames_presented;
     uint32_t text_frames;
     uint32_t text_frames_skipped;
     uint32_t graphics_frames;
+    uint32_t sd_sector_reads;
+    uint32_t sd_sector_track_refills;
+    uint32_t sd_track_reads;
+    uint32_t dsk_probes;
+    uint32_t sd_mounts;
 } app_perf_counters_t;
 
 static app_perf_counters_t s_perf;
@@ -1368,6 +1379,7 @@ static bool app_sd_read_sector(void *context,
 {
     app_sd_drive_file_t *drive = context;
     const size_t sector_offset = (size_t)file_sector * 256U;
+    const int64_t start_us = esp_timer_get_time();
 
     (void)drive_index;
     if (drive == NULL || drive->file == NULL || sector_data == NULL) {
@@ -1397,9 +1409,12 @@ static bool app_sd_read_sector(void *context,
         }
         drive->sector_track_index = track;
         drive->sector_track_valid = true;
+        s_perf.sd_sector_track_refills++;
     }
 
     memcpy(sector_data, &drive->sector_track_data[sector_offset], 256U);
+    s_perf.sd_sector_reads++;
+    s_perf.sd_sector_read_us += (uint64_t)(esp_timer_get_time() - start_us);
     return true;
 }
 
@@ -1410,6 +1425,7 @@ static bool app_sd_read_track(void *context,
                               uint16_t *track_length)
 {
     app_sd_drive_file_t *drive = context;
+    const int64_t start_us = esp_timer_get_time();
     long offset;
     size_t length;
 
@@ -1456,6 +1472,8 @@ static bool app_sd_read_track(void *context,
     }
 
     *track_length = (uint16_t)length;
+    s_perf.sd_track_reads++;
+    s_perf.sd_track_read_us += (uint64_t)(esp_timer_get_time() - start_us);
     return true;
 }
 
@@ -1630,7 +1648,7 @@ static bool app_sd_scan_directory(void)
     return true;
 }
 
-static bool app_sd_probe_file_order(const char *path)
+static bool app_sd_probe_file_order(const char *path, uint32_t *probe_ms_out)
 {
     app_sd_drive_file_t probe = { 0 };
     app_disk_source_t source = {
@@ -1640,6 +1658,8 @@ static bool app_sd_probe_file_order(const char *path)
         .image_size = APPLE2_DISK2_IMAGE_SIZE,
     };
     app_disk_order_t order = APP_DISK_ORDER_DOS33;
+    const int64_t start_us = esp_timer_get_time();
+    uint64_t elapsed_us = 0U;
 
     probe.file = fopen(path, "rb");
     if (probe.file == NULL) {
@@ -1654,6 +1674,12 @@ static bool app_sd_probe_file_order(const char *path)
 #endif
     fclose(probe.file);
     free(probe.sector_track_data);
+    elapsed_us = (uint64_t)(esp_timer_get_time() - start_us);
+    s_perf.dsk_probe_us += elapsed_us;
+    s_perf.dsk_probes++;
+    if (probe_ms_out != NULL) {
+        *probe_ms_out = (uint32_t)(elapsed_us / 1000ULL);
+    }
     return order == APP_DISK_ORDER_PRODOS;
 }
 
@@ -1715,6 +1741,8 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     const app_sd_disk_entry_t *disk;
     apple2_disk2_image_order_t image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
     bool attached = false;
+    const int64_t mount_start_us = esp_timer_get_time();
+    uint32_t probe_ms = 0U;
 
     if (drive_index >= 2U || disk_index >= s_sd_disk_count) {
         return false;
@@ -1764,7 +1792,7 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
             break;
         case APP_SD_DSK_ORDER_AUTO:
         default:
-            image_order = app_sd_probe_file_order(disk->path)
+            image_order = app_sd_probe_file_order(disk->path, &probe_ms)
                               ? APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL
                               : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
             break;
@@ -1802,17 +1830,20 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     }
 
     s_sd_drive_index[drive_index] = (int)disk_index;
+    s_perf.sd_mount_us += (uint64_t)(esp_timer_get_time() - mount_start_us);
+    s_perf.sd_mounts++;
     switch (disk->type) {
     case APP_DISK_IMAGE_PO:
     case APP_DISK_IMAGE_DSK:
     case APP_DISK_IMAGE_DO:
         if (disk->type == APP_DISK_IMAGE_DSK) {
             ESP_LOGI(TAG,
-                     "Mounted SD disk %s in drive %u (%s order, override=%s)",
+                     "Mounted SD disk %s in drive %u (%s order, override=%s, probe=%ums)",
                      disk->name,
                      (unsigned)(drive_index + 1U),
                      (image_order == APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL) ? "ProDOS" : "DOS",
-                     app_sd_dsk_order_override_name(s_sd_dsk_order_override[drive_index]));
+                     app_sd_dsk_order_override_name(s_sd_dsk_order_override[drive_index]),
+                     probe_ms);
         } else {
             ESP_LOGI(TAG,
                      "Mounted SD disk %s in drive %u (%s order)",
@@ -2137,6 +2168,8 @@ static void app_perf_reset(int64_t now_us)
 {
     memset(&s_perf, 0, sizeof(s_perf));
     s_perf.window_start_us = now_us;
+    s_perf.instruction_base = s_machine.instruction_count;
+    s_perf.disk2_profile_base = s_machine.disk2.profile;
 }
 
 static void app_perf_log_if_due(int64_t now_us)
@@ -2148,6 +2181,28 @@ static void app_perf_log_if_due(int64_t now_us)
     }
 
     {
+        const uint64_t instruction_delta = s_machine.instruction_count - s_perf.instruction_base;
+        const apple2_disk2_profile_t *current_disk2 = &s_machine.disk2.profile;
+        const uint64_t disk_tick_calls = current_disk2->tick_calls - s_perf.disk2_profile_base.tick_calls;
+        const uint64_t disk_tick_cycles = current_disk2->tick_cycles - s_perf.disk2_profile_base.tick_cycles;
+        const uint64_t disk_bytes_latched =
+            current_disk2->bytes_latched - s_perf.disk2_profile_base.bytes_latched;
+        const uint64_t disk_track_hits =
+            current_disk2->track_cache_hits - s_perf.disk2_profile_base.track_cache_hits;
+        const uint64_t disk_track_misses =
+            current_disk2->track_cache_misses - s_perf.disk2_profile_base.track_cache_misses;
+        const uint64_t disk_sector_builds =
+            current_disk2->sector_track_builds - s_perf.disk2_profile_base.sector_track_builds;
+        const uint64_t disk_sector_reader_calls =
+            current_disk2->sector_reader_calls - s_perf.disk2_profile_base.sector_reader_calls;
+        const uint64_t disk_track_reader_calls =
+            current_disk2->track_reader_calls - s_perf.disk2_profile_base.track_reader_calls;
+        const uint64_t disk_phase_moves =
+            current_disk2->phase_transitions - s_perf.disk2_profile_base.phase_transitions;
+        const uint64_t disk_drive_switches =
+            current_disk2->drive_switches - s_perf.disk2_profile_base.drive_switches;
+        const uint64_t disk_motor_starts =
+            current_disk2->motor_starts - s_perf.disk2_profile_base.motor_starts;
         const uint64_t effective_khz =
             (elapsed_us > 0) ? (s_perf.emulated_cycles * 1000ULL) / (uint64_t)elapsed_us : 0ULL;
         const uint32_t fps_x10 =
@@ -2159,11 +2214,20 @@ static void app_perf_log_if_due(int64_t now_us)
             (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
         const uint32_t present_pct =
             (elapsed_us > 0) ? (uint32_t)(s_perf.frame_present_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t sd_sector_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.sd_sector_read_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t sd_track_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.sd_track_read_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t instruction_khz =
+            (elapsed_us > 0) ? (uint32_t)(instruction_delta * 1000ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t cycles_per_instruction_x100 =
+            (instruction_delta > 0U) ? (uint32_t)((s_perf.emulated_cycles * 100ULL) / instruction_delta) : 0U;
 
         ESP_LOGI(TAG,
                  "perf apple=%" PRIu64 ".%03" PRIu64 "MHz mode=%s rate=%ux fps=%" PRIu32 ".%" PRIu32
                  " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
-                 "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32,
+                 "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32
+                 " instr=%" PRIu32 ".%03" PRIu32 "M cpi=%" PRIu32 ".%02" PRIu32,
                  effective_khz / 1000ULL,
                  effective_khz % 1000ULL,
                  app_speed_mode_name(),
@@ -2176,7 +2240,39 @@ static void app_perf_log_if_due(int64_t now_us)
                  s_perf.frames_presented,
                  s_perf.text_frames,
                  s_perf.text_frames_skipped,
-                 s_perf.graphics_frames);
+                 s_perf.graphics_frames,
+                 instruction_khz / 1000U,
+                 instruction_khz % 1000U,
+                 cycles_per_instruction_x100 / 100U,
+                 cycles_per_instruction_x100 % 100U);
+        ESP_LOGI(TAG,
+                 "perf disk tick=%" PRIu64 " cyc=%" PRIu64 " bytes=%" PRIu64
+                 " cache=%" PRIu64 "/%" PRIu64 " build=%" PRIu64
+                 " rdr=%" PRIu64 " trk=%" PRIu64 " move=%" PRIu64
+                 " drv=%" PRIu64 " mot=%" PRIu64
+                 " sd_sec=%" PRIu32 "@%" PRIu32 "%% refill=%" PRIu32
+                 " sd_trk=%" PRIu32 "@%" PRIu32 "%% probe=%" PRIu32 "ms/%" PRIu32
+                 " mount=%" PRIu32 "ms/%" PRIu32,
+                 disk_tick_calls,
+                 disk_tick_cycles,
+                 disk_bytes_latched,
+                 disk_track_hits,
+                 disk_track_misses,
+                 disk_sector_builds,
+                 disk_sector_reader_calls,
+                 disk_track_reader_calls,
+                 disk_phase_moves,
+                 disk_drive_switches,
+                 disk_motor_starts,
+                 s_perf.sd_sector_reads,
+                 sd_sector_pct,
+                 s_perf.sd_sector_track_refills,
+                 s_perf.sd_track_reads,
+                 sd_track_pct,
+                 (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
+                 s_perf.dsk_probes,
+                 (uint32_t)(s_perf.sd_mount_us / 1000ULL),
+                 s_perf.sd_mounts);
     }
 
     app_perf_reset(now_us);
