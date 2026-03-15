@@ -469,6 +469,7 @@ static void app_clear_text_pages(void)
 static void app_reset_and_boot_slot6(bool rom_loaded)
 {
     apple2_machine_reset(&s_machine);
+    memset(s_machine.memory, 0, 0xC000U);
     app_clear_text_pages();
     app_text_cache_reset();
     if (!rom_loaded) {
