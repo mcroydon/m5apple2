@@ -126,10 +126,23 @@ static bool cardputer_keymap_ctrl_modifier_active(uint64_t pressed_mask)
 
 static bool cardputer_keymap_command_modifier_active(uint64_t pressed_mask)
 {
+#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    /* The ADV hardware is still behaving inconsistently for command-modifier
+       combos. Accept both the decoded Fn and Ctrl coordinates for emulator
+       hotkeys there so function-key commands remain usable without affecting
+       the original Cardputer mapping. */
+    if (cardputer_keymap_modifier_active(pressed_mask,
+                                         (cardputer_keycoord_t){ .row = 2U, .column = 0U }) ||
+        cardputer_keymap_modifier_active(pressed_mask,
+                                         (cardputer_keycoord_t){ .row = 3U, .column = 0U })) {
+        return true;
+    }
+#else
     if (cardputer_keymap_modifier_active(pressed_mask,
                                          (cardputer_keycoord_t){ .row = 2U, .column = 0U })) {
         return true;
     }
+#endif
 
     return false;
 }
