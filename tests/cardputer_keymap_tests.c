@@ -48,6 +48,30 @@ static void test_adv_decode(void)
     assert(!cardputer_keymap_decode_adv(0, 8, &coord));
 }
 
+static void test_adv_event_decode(void)
+{
+    cardputer_keycoord_t coord;
+    bool pressed = false;
+
+    assert(cardputer_keymap_decode_adv_event(0x01U, &pressed, &coord));
+    assert(pressed);
+    assert(coord.row == 0U);
+    assert(coord.column == 0U);
+
+    assert(cardputer_keymap_decode_adv_event(0x81U, &pressed, &coord));
+    assert(!pressed);
+    assert(coord.row == 0U);
+    assert(coord.column == 0U);
+
+    assert(cardputer_keymap_decode_adv_event(0x44U, &pressed, &coord));
+    assert(pressed);
+    assert(coord.row == 3U);
+    assert(coord.column == 13U);
+
+    assert(!cardputer_keymap_decode_adv_event(0x00U, &pressed, &coord));
+    assert(!cardputer_keymap_decode_adv_event(0x50U, &pressed, &coord));
+}
+
 static void test_ascii_translation(void)
 {
     uint8_t ascii = 0;
@@ -204,6 +228,7 @@ int main(void)
 {
     test_original_decode();
     test_adv_decode();
+    test_adv_event_decode();
     test_ascii_translation();
     test_modifiers_do_not_emit_ascii();
     test_fn_disk_commands();

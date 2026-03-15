@@ -16,6 +16,9 @@ bool cardputer_keymap_decode_original(uint8_t select_index,
                                       uint8_t input_index,
                                       cardputer_keycoord_t *coord);
 bool cardputer_keymap_decode_adv(uint8_t row_index, uint8_t col_index, cardputer_keycoord_t *coord);
+bool cardputer_keymap_decode_adv_event(uint8_t event,
+                                       bool *pressed,
+                                       cardputer_keycoord_t *coord);
 bool cardputer_keymap_coord_from_index(uint8_t index, cardputer_keycoord_t *coord);
 bool cardputer_keymap_is_modifier(cardputer_keycoord_t coord);
 uint64_t cardputer_keymap_mask_for_coord(cardputer_keycoord_t coord);

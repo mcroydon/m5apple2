@@ -341,22 +341,20 @@ static esp_err_t cardputer_adv_keyboard_init(void)
     }
 
     s_last_adv_poll = xTaskGetTickCount();
-    return cardputer_adv_flush();
+    err = cardputer_adv_flush();
+    if (err == ESP_OK) {
+        ESP_LOGI(TAG, "ADV keyboard ready");
+    }
+    return err;
 }
 
 static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
 {
     cardputer_keycoord_t coord;
-    const uint8_t code = (uint8_t)(event & 0x7FU);
-    const bool pressed = (event & 0x80U) != 0U;
-    const uint8_t row = (uint8_t)((code - 1U) / 10U);
-    const uint8_t col = (uint8_t)((code - 1U) % 10U);
+    bool pressed = false;
     uint64_t bit;
 
-    if (code == 0U) {
-        return;
-    }
-    if (!cardputer_keymap_decode_adv(row, col, &coord)) {
+    if (!cardputer_keymap_decode_adv_event(event, &pressed, &coord)) {
         return;
     }
 

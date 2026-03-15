@@ -194,6 +194,23 @@ bool cardputer_keymap_decode_adv(uint8_t row_index, uint8_t col_index, cardputer
     return cardputer_keymap_decode_original((uint8_t)(7U - col_index), row_index, coord);
 }
 
+bool cardputer_keymap_decode_adv_event(uint8_t event,
+                                       bool *pressed,
+                                       cardputer_keycoord_t *coord)
+{
+    const uint8_t code = (uint8_t)(event & 0x7FU);
+    const uint8_t row = (uint8_t)((code - 1U) / 10U);
+    const uint8_t col = (uint8_t)((code - 1U) % 10U);
+
+    if (pressed == 0 || coord == 0 || code == 0U) {
+        return false;
+    }
+
+    /* TCA8418 events use a clear high bit for press and a set high bit for release. */
+    *pressed = (event & 0x80U) == 0U;
+    return cardputer_keymap_decode_adv(row, col, coord);
+}
+
 bool cardputer_keymap_coord_from_index(uint8_t index, cardputer_keycoord_t *coord)
 {
     if (coord == 0 || index >= CARDPUTER_KEYMAP_KEYS) {
