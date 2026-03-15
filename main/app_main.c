@@ -476,8 +476,8 @@ static void app_reset_and_boot_slot6(bool rom_loaded)
         app_show_status_screen("PLACE APPLE2PLUS.ROM IN", "roms/ AND REBUILD.", "RUNS WITHOUT ROM SHOW STATUS.");
         return;
     }
-
-    app_boot_slot6();
+    apple2_machine_reset(&s_machine);
+    ESP_LOGI(TAG, "Cold reset with current drive mounts");
 }
 
 static void app_clear_text_screen(void)
