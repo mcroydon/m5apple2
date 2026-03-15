@@ -786,7 +786,6 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
     uint8_t drive;
     uint32_t *stream_accum;
     uint32_t accum;
-    uint32_t advance_bytes;
     uint32_t *nibble_pos;
     uint16_t track_length;
 
@@ -805,23 +804,16 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
         return;
     }
     *stream_accum = accum;
-    advance_bytes = *stream_accum / cpu_hz;
-    if (advance_bytes == 0U) {
-        return;
-    }
     if (!disk2_prepare_track(disk2)) {
         return;
     }
     track_length = disk2->track_cache_length;
-    *stream_accum -= advance_bytes * cpu_hz;
+    *stream_accum -= cpu_hz;
 
     nibble_pos = &disk2->nibble_pos[drive];
-    if (advance_bytes >= track_length) {
-        advance_bytes %= track_length;
-    }
-    *nibble_pos += advance_bytes;
-    if (*nibble_pos >= track_length) {
-        *nibble_pos -= track_length;
+    (*nibble_pos)++;
+    if (*nibble_pos == track_length) {
+        *nibble_pos = 0U;
     }
     disk2_latch_prepared_byte(disk2);
 }

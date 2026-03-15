@@ -43,10 +43,8 @@ static inline void apple2_machine_tick_flash(apple2_machine_t *machine, uint32_t
         return;
     }
 
-    while (machine->flash_cycle_accum >= machine->flash_half_period_cycles) {
-        machine->flash_cycle_accum -= machine->flash_half_period_cycles;
-        machine->video.flash_state = !machine->video.flash_state;
-    }
+    machine->flash_cycle_accum -= machine->flash_half_period_cycles;
+    machine->video.flash_state = !machine->video.flash_state;
 }
 
 static inline uint8_t apple2_bus_value(apple2_machine_t *machine, uint8_t value)
