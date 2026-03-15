@@ -365,6 +365,17 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
     } else {
         *pressed_mask &= ~bit;
     }
+
+    if ((coord.row >= 2U && coord.column <= 2U) ||
+        (coord.row == 0U && coord.column == 5U)) {
+        ESP_LOGI(TAG,
+                 "ADV combo event=0x%02x pressed=%d coord=%u,%u mask=%016llx",
+                 event,
+                 pressed ? 1 : 0,
+                 (unsigned)coord.row,
+                 (unsigned)coord.column,
+                 (unsigned long long)*pressed_mask);
+    }
 }
 
 static void cardputer_adv_keyboard_poll(void)
