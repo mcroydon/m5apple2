@@ -362,6 +362,9 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
             }
         }
         apple2_machine_step_instruction(probe);
+        if (instruction_limit > APP_DSK_PROBE_INSTRUCTIONS && (i % 4096U) == 0U) {
+            vTaskDelay(pdMS_TO_TICKS(1));
+        }
     }
 
     {
@@ -422,6 +425,22 @@ static bool app_dsk_probe_result_is_slot6_stall(const app_dsk_probe_result_t *re
            !result->entered_stage2;
 }
 
+static bool app_dsk_probe_result_is_monitor_fallback(const app_dsk_probe_result_t *result)
+{
+    return result != NULL &&
+           result->pc >= 0xFD00U &&
+           result->quarter_track == 0U &&
+           !result->entered_stage2;
+}
+
+static bool app_dsk_probe_result_is_advanced_loader(const app_dsk_probe_result_t *result)
+{
+    return result != NULL &&
+           (result->entered_stage2 ||
+            result->quarter_track >= 4U ||
+            (result->pc >= 0x0200U && result->pc < 0xC600U));
+}
+
 static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *source)
 {
     app_dsk_probe_result_t dos_result = { 0 };
@@ -452,6 +471,17 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
                  prodos_result.pc,
                  prodos_result.quarter_track,
                  prodos_result.nibble_pos);
+    }
+
+    if (app_dsk_probe_result_is_advanced_loader(&dos_result) &&
+        app_dsk_probe_result_is_monitor_fallback(&prodos_result)) {
+        ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d (advanced DOS wins)", dos_score, prodos_score);
+        return APP_DISK_ORDER_DOS33;
+    }
+    if (app_dsk_probe_result_is_advanced_loader(&prodos_result) &&
+        app_dsk_probe_result_is_monitor_fallback(&dos_result)) {
+        ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d (advanced ProDOS wins)", dos_score, prodos_score);
+        return APP_DISK_ORDER_PRODOS;
     }
 
     ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d", dos_score, prodos_score);

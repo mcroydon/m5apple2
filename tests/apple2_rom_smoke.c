@@ -254,6 +254,19 @@ static disk_image_type_t disk_probe_dsk_order(const uint8_t *rom,
                                  &prodos_stage2);
     }
 
+    if ((dos_stage2 || dos_qt >= 4U || (dos_cpu.pc >= 0x0200U && dos_cpu.pc < 0xC600U)) &&
+        prodos_cpu.pc >= 0xFD00U &&
+        prodos_qt == 0U &&
+        !prodos_stage2) {
+        return DISK_IMAGE_DSK_DOS_ORDER;
+    }
+    if ((prodos_stage2 || prodos_qt >= 4U || (prodos_cpu.pc >= 0x0200U && prodos_cpu.pc < 0xC600U)) &&
+        dos_cpu.pc >= 0xFD00U &&
+        dos_qt == 0U &&
+        !dos_stage2) {
+        return DISK_IMAGE_DSK_PRODOS_ORDER;
+    }
+
     return (prodos_score >= dos_score) ? DISK_IMAGE_DSK_PRODOS_ORDER : DISK_IMAGE_DSK_DOS_ORDER;
 }
 
