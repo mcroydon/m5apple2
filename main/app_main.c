@@ -94,6 +94,7 @@ extern const uint8_t dos_3_3_woz_end[] asm("_binary_dos_3_3_woz_end");
 #endif
 
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
+#define APP_DSK_PROBE_FALLBACK_INSTRUCTIONS 3000000U
 #define APP_SD_MOUNT_POINT "/sd"
 #define APP_PERF_LOG_INTERVAL_US ((int64_t)CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS * 1000LL)
 
@@ -144,6 +145,14 @@ typedef struct {
     void *context;
     size_t image_size;
 } app_disk_source_t;
+
+typedef struct {
+    int score;
+    uint16_t pc;
+    uint8_t quarter_track;
+    uint32_t nibble_pos;
+    bool entered_stage2;
+} app_dsk_probe_result_t;
 
 #define APP_SD_MAX_IMAGES 16U
 #define APP_SD_PATH_MAX 128U
@@ -315,7 +324,10 @@ static bool app_attach_probe_drive(apple2_machine_t *probe,
                                               image_order);
 }
 
-static int app_score_dsk_order_source(const app_disk_source_t *source, app_disk_order_t order)
+static int app_score_dsk_order_source(const app_disk_source_t *source,
+                                      app_disk_order_t order,
+                                      uint32_t instruction_limit,
+                                      app_dsk_probe_result_t *result)
 {
     apple2_machine_t *probe = &s_probe_machine;
     bool entered_stage2 = false;
@@ -335,7 +347,7 @@ static int app_score_dsk_order_source(const app_disk_source_t *source, app_disk_
         return INT_MIN / 2;
     }
 
-    for (uint32_t i = 0; i < APP_DSK_PROBE_INSTRUCTIONS; ++i) {
+    for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(probe);
 
         if (cpu.pc >= 0x3700U && cpu.pc < 0x4000U) {
@@ -369,11 +381,20 @@ static int app_score_dsk_order_source(const app_disk_source_t *source, app_disk_
         if (probe->disk2.quarter_track[0] != 0U) {
             score += 128;
         }
+        if (probe->disk2.quarter_track[0] >= 4U) {
+            score += 256;
+        }
+        if (cpu.pc >= 0xB000U && cpu.pc < 0xC000U) {
+            score += 512;
+        }
         if (cpu.pc >= 0x3000U && cpu.pc < 0x4000U) {
             score += 128;
         }
         if (entered_stage2) {
             score += 64;
+        }
+        if (cpu.pc >= 0xC600U && cpu.pc < 0xC700U) {
+            score -= 128;
         }
         if (cpu.pc < 0x0100U) {
             score -= 512;
@@ -381,14 +402,57 @@ static int app_score_dsk_order_source(const app_disk_source_t *source, app_disk_
         if (cpu.pc >= 0xFD00U) {
             score -= 256;
         }
+        if (result != NULL) {
+            result->score = score;
+            result->pc = cpu.pc;
+            result->quarter_track = probe->disk2.quarter_track[0];
+            result->nibble_pos = probe->disk2.nibble_pos[0];
+            result->entered_stage2 = entered_stage2;
+        }
         return score;
     }
 }
 
+static bool app_dsk_probe_result_is_slot6_stall(const app_dsk_probe_result_t *result)
+{
+    return result != NULL &&
+           result->pc >= 0xC600U &&
+           result->pc < 0xC700U &&
+           result->quarter_track == 0U &&
+           !result->entered_stage2;
+}
+
 static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *source)
 {
-    const int dos_score = app_score_dsk_order_source(source, APP_DISK_ORDER_DOS33);
-    const int prodos_score = app_score_dsk_order_source(source, APP_DISK_ORDER_PRODOS);
+    app_dsk_probe_result_t dos_result = { 0 };
+    app_dsk_probe_result_t prodos_result = { 0 };
+    int dos_score =
+        app_score_dsk_order_source(source, APP_DISK_ORDER_DOS33, APP_DSK_PROBE_INSTRUCTIONS, &dos_result);
+    int prodos_score =
+        app_score_dsk_order_source(source, APP_DISK_ORDER_PRODOS, APP_DSK_PROBE_INSTRUCTIONS, &prodos_result);
+
+    if (app_dsk_probe_result_is_slot6_stall(&dos_result) &&
+        app_dsk_probe_result_is_slot6_stall(&prodos_result)) {
+        dos_score = app_score_dsk_order_source(source,
+                                               APP_DISK_ORDER_DOS33,
+                                               APP_DSK_PROBE_FALLBACK_INSTRUCTIONS,
+                                               &dos_result);
+        prodos_score = app_score_dsk_order_source(source,
+                                                  APP_DISK_ORDER_PRODOS,
+                                                  APP_DSK_PROBE_FALLBACK_INSTRUCTIONS,
+                                                  &prodos_result);
+        ESP_LOGI(TAG,
+                 "Deep-probed .dsk order: dos=%d@%04x qt=%u np=%" PRIu32
+                 " prodos=%d@%04x qt=%u np=%" PRIu32,
+                 dos_score,
+                 dos_result.pc,
+                 dos_result.quarter_track,
+                 dos_result.nibble_pos,
+                 prodos_score,
+                 prodos_result.pc,
+                 prodos_result.quarter_track,
+                 prodos_result.nibble_pos);
+    }
 
     ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d", dos_score, prodos_score);
     return (prodos_score >= dos_score) ? APP_DISK_ORDER_PRODOS : APP_DISK_ORDER_DOS33;

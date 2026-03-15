@@ -17,6 +17,7 @@ typedef enum {
 } disk_image_type_t;
 
 #define DSK_PROBE_INSTRUCTIONS 900000U
+#define DSK_PROBE_FALLBACK_INSTRUCTIONS 3000000U
 #define DOS_PROMPT_INSTRUCTIONS 17000000U
 #define CUSTOM_DISK_INSTRUCTIONS 40000000U
 
@@ -85,7 +86,12 @@ static int disk_score_dsk_order(const uint8_t *rom,
                                 size_t slot6_rom_size,
                                 const uint8_t *disk,
                                 size_t disk_size,
-                                bool prodos_order)
+                                bool prodos_order,
+                                uint32_t instruction_limit,
+                                apple2_cpu_state_t *cpu_out,
+                                uint8_t *quarter_track_out,
+                                uint32_t *nibble_pos_out,
+                                bool *entered_stage2_out)
 {
     apple2_machine_t probe;
     bool entered_stage2 = false;
@@ -101,7 +107,7 @@ static int disk_score_dsk_order(const uint8_t *rom,
         return INT_MIN / 2;
     }
 
-    for (uint32_t i = 0; i < DSK_PROBE_INSTRUCTIONS; ++i) {
+    for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&probe);
 
         if (cpu.pc >= 0x3700U && cpu.pc < 0x4000U) {
@@ -139,17 +145,38 @@ static int disk_score_dsk_order(const uint8_t *rom,
         if (probe.disk2.quarter_track[0] != 0U) {
             score += 128;
         }
+        if (probe.disk2.quarter_track[0] >= 4U) {
+            score += 256;
+        }
+        if (cpu.pc >= 0xB000U && cpu.pc < 0xC000U) {
+            score += 512;
+        }
         if (cpu.pc >= 0x3000U && cpu.pc < 0x4000U) {
             score += 128;
         }
         if (entered_stage2) {
             score += 64;
         }
+        if (cpu.pc >= 0xC600U && cpu.pc < 0xC700U) {
+            score -= 128;
+        }
         if (cpu.pc < 0x0100U) {
             score -= 512;
         }
         if (cpu.pc >= 0xFD00U) {
             score -= 256;
+        }
+        if (cpu_out != NULL) {
+            *cpu_out = cpu;
+        }
+        if (quarter_track_out != NULL) {
+            *quarter_track_out = probe.disk2.quarter_track[0];
+        }
+        if (nibble_pos_out != NULL) {
+            *nibble_pos_out = probe.disk2.nibble_pos[0];
+        }
+        if (entered_stage2_out != NULL) {
+            *entered_stage2_out = entered_stage2;
         }
         return score;
     }
@@ -162,8 +189,70 @@ static disk_image_type_t disk_probe_dsk_order(const uint8_t *rom,
                                               const uint8_t *disk,
                                               size_t disk_size)
 {
-    const int dos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, false);
-    const int prodos_score = disk_score_dsk_order(rom, rom_size, slot6_rom, slot6_rom_size, disk, disk_size, true);
+    apple2_cpu_state_t dos_cpu = { 0 };
+    apple2_cpu_state_t prodos_cpu = { 0 };
+    uint8_t dos_qt = 0U;
+    uint8_t prodos_qt = 0U;
+    bool dos_stage2 = false;
+    bool prodos_stage2 = false;
+    int dos_score =
+        disk_score_dsk_order(rom,
+                             rom_size,
+                             slot6_rom,
+                             slot6_rom_size,
+                             disk,
+                             disk_size,
+                             false,
+                             DSK_PROBE_INSTRUCTIONS,
+                             &dos_cpu,
+                             &dos_qt,
+                             NULL,
+                             &dos_stage2);
+    int prodos_score =
+        disk_score_dsk_order(rom,
+                             rom_size,
+                             slot6_rom,
+                             slot6_rom_size,
+                             disk,
+                             disk_size,
+                             true,
+                             DSK_PROBE_INSTRUCTIONS,
+                             &prodos_cpu,
+                             &prodos_qt,
+                             NULL,
+                             &prodos_stage2);
+
+    if (dos_cpu.pc >= 0xC600U && dos_cpu.pc < 0xC700U &&
+        prodos_cpu.pc >= 0xC600U && prodos_cpu.pc < 0xC700U &&
+        dos_qt == 0U && prodos_qt == 0U &&
+        !dos_stage2 && !prodos_stage2) {
+        dos_score =
+            disk_score_dsk_order(rom,
+                                 rom_size,
+                                 slot6_rom,
+                                 slot6_rom_size,
+                                 disk,
+                                 disk_size,
+                                 false,
+                                 DSK_PROBE_FALLBACK_INSTRUCTIONS,
+                                 &dos_cpu,
+                                 &dos_qt,
+                                 NULL,
+                                 &dos_stage2);
+        prodos_score =
+            disk_score_dsk_order(rom,
+                                 rom_size,
+                                 slot6_rom,
+                                 slot6_rom_size,
+                                 disk,
+                                 disk_size,
+                                 true,
+                                 DSK_PROBE_FALLBACK_INSTRUCTIONS,
+                                 &prodos_cpu,
+                                 &prodos_qt,
+                                 NULL,
+                                 &prodos_stage2);
+    }
 
     return (prodos_score >= dos_score) ? DISK_IMAGE_DSK_PRODOS_ORDER : DISK_IMAGE_DSK_DOS_ORDER;
 }
