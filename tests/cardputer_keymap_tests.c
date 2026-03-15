@@ -224,6 +224,15 @@ static void test_fn_arrow_commands(void)
     assert(ascii == 0x15U);
 }
 
+static void test_fn_command_candidates(void)
+{
+    assert(cardputer_keymap_has_fn_command((cardputer_keycoord_t){ .row = 0U, .column = 5U }));
+    assert(cardputer_keymap_has_fn_command((cardputer_keycoord_t){ .row = 1U, .column = 8U }));
+    assert(cardputer_keymap_has_fn_command((cardputer_keycoord_t){ .row = 3U, .column = 12U }));
+    assert(!cardputer_keymap_has_fn_command((cardputer_keycoord_t){ .row = 1U, .column = 1U }));
+    assert(!cardputer_keymap_has_fn_command((cardputer_keycoord_t){ .row = 2U, .column = 0U }));
+}
+
 int main(void)
 {
     test_original_decode();
@@ -233,6 +242,7 @@ int main(void)
     test_modifiers_do_not_emit_ascii();
     test_fn_disk_commands();
     test_fn_arrow_commands();
+    test_fn_command_candidates();
     puts("cardputer keymap tests passed");
     return 0;
 }

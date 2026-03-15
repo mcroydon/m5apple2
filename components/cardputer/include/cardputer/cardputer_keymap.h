@@ -21,6 +21,7 @@ bool cardputer_keymap_decode_adv_event(uint8_t event,
                                        cardputer_keycoord_t *coord);
 bool cardputer_keymap_coord_from_index(uint8_t index, cardputer_keycoord_t *coord);
 bool cardputer_keymap_is_modifier(cardputer_keycoord_t coord);
+bool cardputer_keymap_has_fn_command(cardputer_keycoord_t coord);
 uint64_t cardputer_keymap_mask_for_coord(cardputer_keycoord_t coord);
 bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
                                       cardputer_keycoord_t coord,

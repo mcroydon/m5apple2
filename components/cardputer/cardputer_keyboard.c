@@ -27,6 +27,7 @@
 #define CARDPUTER_ADV_INT_GPIO 11
 #define CARDPUTER_ADV_SDA_GPIO 8
 #define CARDPUTER_ADV_SCL_GPIO 9
+#define CARDPUTER_ADV_FN_CHORD_WINDOW_MS 30
 
 #define TCA8418_REG_CFG 0x01
 #define TCA8418_REG_INT_STAT 0x02
@@ -52,6 +53,12 @@ static uint64_t s_matrix_mask;
 #endif
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 static TickType_t s_last_adv_poll;
+static uint64_t s_adv_pressed_mask;
+static struct {
+    bool active;
+    cardputer_keycoord_t coord;
+    TickType_t deadline;
+} s_adv_pending_press;
 #endif
 
 static uint8_t cardputer_translate_input(int ch)
@@ -229,6 +236,40 @@ static void cardputer_original_keyboard_poll(void)
 #endif
 
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+static bool cardputer_coord_equal(cardputer_keycoord_t a, cardputer_keycoord_t b)
+{
+    return a.row == b.row && a.column == b.column;
+}
+
+static bool cardputer_adv_fn_active(uint64_t pressed_mask)
+{
+    return (pressed_mask &
+            cardputer_keymap_mask_for_coord((cardputer_keycoord_t){ .row = 2U, .column = 0U })) != 0U;
+}
+
+static void cardputer_adv_emit_pending(uint64_t pressed_mask)
+{
+    if (!s_adv_pending_press.active) {
+        return;
+    }
+
+    cardputer_queue_matrix_press(pressed_mask, s_adv_pending_press.coord);
+    s_adv_pending_press.active = false;
+}
+
+static void cardputer_adv_flush_expired_pending(TickType_t now)
+{
+    if (!s_adv_pending_press.active) {
+        return;
+    }
+
+    if ((int32_t)(now - s_adv_pending_press.deadline) < 0) {
+        return;
+    }
+
+    cardputer_adv_emit_pending(s_adv_pressed_mask);
+}
+
 static esp_err_t cardputer_adv_write_reg(uint8_t reg, uint8_t value)
 {
     const uint8_t payload[2] = { reg, value };
@@ -341,6 +382,8 @@ static esp_err_t cardputer_adv_keyboard_init(void)
     }
 
     s_last_adv_poll = xTaskGetTickCount();
+    s_adv_pressed_mask = 0U;
+    s_adv_pending_press.active = false;
     err = cardputer_adv_flush();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "ADV keyboard ready");
@@ -360,18 +403,45 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
 
     bit = cardputer_keymap_mask_for_coord(coord);
     if (pressed) {
+        if (s_adv_pending_press.active &&
+            !cardputer_coord_equal(s_adv_pending_press.coord, coord) &&
+            !(coord.row == 2U && coord.column == 0U)) {
+            cardputer_adv_emit_pending(*pressed_mask);
+        }
+
         *pressed_mask |= bit;
+        if (cardputer_keymap_is_modifier(coord)) {
+            if (coord.row == 2U && coord.column == 0U && s_adv_pending_press.active) {
+                cardputer_adv_emit_pending(*pressed_mask);
+            }
+            return;
+        }
+
+        if (!cardputer_adv_fn_active(*pressed_mask) &&
+            cardputer_keymap_has_fn_command(coord)) {
+            s_adv_pending_press.active = true;
+            s_adv_pending_press.coord = coord;
+            s_adv_pending_press.deadline =
+                xTaskGetTickCount() + pdMS_TO_TICKS(CARDPUTER_ADV_FN_CHORD_WINDOW_MS);
+            return;
+        }
+
         cardputer_queue_matrix_press(*pressed_mask, coord);
     } else {
+        if (s_adv_pending_press.active &&
+            cardputer_coord_equal(s_adv_pending_press.coord, coord)) {
+            cardputer_adv_emit_pending(*pressed_mask);
+        }
         *pressed_mask &= ~bit;
     }
 }
 
 static void cardputer_adv_keyboard_poll(void)
 {
-    static uint64_t pressed_mask;
     const TickType_t now = xTaskGetTickCount();
     uint8_t count = 0;
+
+    cardputer_adv_flush_expired_pending(now);
 
     if (gpio_get_level((gpio_num_t)CARDPUTER_ADV_INT_GPIO) != 0 &&
         (now - s_last_adv_poll) < pdMS_TO_TICKS(CARDPUTER_MATRIX_SCAN_PERIOD_MS)) {
@@ -389,7 +459,7 @@ static void cardputer_adv_keyboard_poll(void)
             if (cardputer_adv_read_reg(TCA8418_REG_KEY_EVENT_A, &event) != ESP_OK) {
                 break;
             }
-            cardputer_adv_handle_event(event, &pressed_mask);
+            cardputer_adv_handle_event(event, &s_adv_pressed_mask);
         }
     }
     (void)cardputer_adv_clear_interrupts();

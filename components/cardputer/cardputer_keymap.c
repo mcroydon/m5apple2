@@ -188,6 +188,18 @@ static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
     }
 }
 
+bool cardputer_keymap_has_fn_command(cardputer_keycoord_t coord)
+{
+    const cardputer_keydef_t *key = cardputer_keymap_lookup(coord);
+    uint8_t ascii = 0;
+
+    if (key == 0 || key->kind != CARDPUTER_KEY_KIND_CHAR) {
+        return false;
+    }
+
+    return cardputer_keymap_fn_ascii_for_char(key->normal, &ascii);
+}
+
 bool cardputer_keymap_decode_original(uint8_t select_index,
                                       uint8_t input_index,
                                       cardputer_keycoord_t *coord)
@@ -290,7 +302,8 @@ bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
     case CARDPUTER_KEY_KIND_CHAR:
         value = shift ? key->shifted : key->normal;
         if (fn) {
-            if (cardputer_keymap_fn_ascii_for_char(key->normal, ascii)) {
+            if (cardputer_keymap_has_fn_command(coord) &&
+                cardputer_keymap_fn_ascii_for_char(key->normal, ascii)) {
                 return true;
             }
         }
