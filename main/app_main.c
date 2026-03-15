@@ -22,6 +22,9 @@
 #ifndef CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS
 #define CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS 2000
 #endif
+#ifndef CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
+#define CONFIG_M5APPLE2_DETAILED_PERF_PROFILE 0
+#endif
 
 static const char *TAG = "m5apple2";
 static apple2_machine_t s_machine;
@@ -2174,10 +2177,6 @@ static void app_perf_log_if_due(int64_t now_us)
                              : 0U;
         const uint32_t cpu_pct =
             (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t cpu_disk_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_disk_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t cpu_idle_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_idle_us * 100ULL / (uint64_t)elapsed_us) : 0U;
         const uint32_t compose_pct =
             (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
         const uint32_t present_pct =
@@ -2200,6 +2199,13 @@ static void app_perf_log_if_due(int64_t now_us)
                  s_perf.text_frames,
                  s_perf.text_frames_skipped,
                  s_perf.graphics_frames);
+#if CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
+        {
+            const uint32_t cpu_disk_pct =
+                (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_disk_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+            const uint32_t cpu_idle_pct =
+                (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_idle_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+
         ESP_LOGI(TAG,
                  "perf path disk_cpu=%" PRIu32 "%% idle_cpu=%" PRIu32 "%% act=%" PRIu32
                  " idle=%" PRIu32 " drv=%" PRIu32 " qt=%" PRIu32 " nib=%" PRIu32
@@ -2218,6 +2224,8 @@ static void app_perf_log_if_due(int64_t now_us)
                  s_perf.dsk_probes,
                  (uint32_t)(s_perf.sd_mount_us / 1000ULL),
                  s_perf.sd_mounts);
+        }
+#endif
     }
 
     app_perf_reset(now_us);
@@ -2321,16 +2329,19 @@ void app_main(void)
                                                 ? max_step_slice_cycles
                                                 : (uint32_t)cpu_cycle_credit;
                     const uint64_t previous_cycles = s_machine.total_cycles;
+                    uint64_t executed_cycles;
+#if CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
                     const bool motor_before = s_machine.disk2.motor_on;
                     const uint8_t drive_before = s_machine.disk2.active_drive;
                     const uint8_t quarter_track_before = s_machine.disk2.quarter_track[drive_before];
                     const uint32_t nibble_before = s_machine.disk2.nibble_pos[drive_before];
                     const int64_t slice_start_us = esp_timer_get_time();
-                    uint64_t executed_cycles;
+#endif
 
                     apple2_machine_step(&s_machine, budget);
                     executed_cycles = s_machine.total_cycles - previous_cycles;
                     s_perf.emulated_cycles += executed_cycles;
+#if CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
                     {
                         const bool motor_after = s_machine.disk2.motor_on;
                         const uint8_t drive_after = s_machine.disk2.active_drive;
@@ -2369,6 +2380,7 @@ void app_main(void)
                             }
                         }
                     }
+#endif
                     if (executed_cycles >= cpu_cycle_credit) {
                         cpu_cycle_credit = 0U;
                     } else {

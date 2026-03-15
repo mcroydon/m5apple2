@@ -116,6 +116,14 @@ config M5APPLE2_PERF_LOG_INTERVAL_MS
     int "Performance log interval (ms)"
     default 2000
 
+config M5APPLE2_DETAILED_PERF_PROFILE
+    bool "Enable detailed hot-path performance profiling"
+    default n
+    help
+        Enable extra per-slice timing and Disk II progress counters for
+        profiling. This adds noticeable overhead in accelerated modes and is
+        intended for debugging rather than normal use.
+
 config M5APPLE2_SD_ENABLE
     bool "Enable SD disk library"
     default y
