@@ -47,6 +47,12 @@ static const int8_t s_stepper_state_for_mask[16] = {
 
 static bool disk2_latch_current_byte(apple2_disk2_t *disk2);
 
+static inline void disk2_latch_prepared_byte(apple2_disk2_t *disk2)
+{
+    disk2->data_latch = disk2->track_cache[disk2->nibble_pos[disk2->active_drive]];
+    disk2->data_ready = true;
+}
+
 static uint8_t disk2_track_cache_key_for_drive(const apple2_disk2_t *disk2,
                                                uint8_t drive,
                                                uint8_t quarter_track)
@@ -483,25 +489,8 @@ static bool disk2_latch_current_byte(apple2_disk2_t *disk2)
         return false;
     }
 
-    disk2->data_latch = disk2->track_cache[disk2->nibble_pos[disk2->active_drive]];
-    disk2->data_ready = true;
+    disk2_latch_prepared_byte(disk2);
     return true;
-}
-
-static bool disk2_advance_data_latch(apple2_disk2_t *disk2)
-{
-    uint32_t *nibble_pos;
-
-    if (!disk2_prepare_track(disk2)) {
-        return false;
-    }
-
-    nibble_pos = &disk2->nibble_pos[disk2->active_drive];
-    (*nibble_pos)++;
-    if (*nibble_pos >= disk2->track_cache_length) {
-        *nibble_pos = 0U;
-    }
-    return disk2_latch_current_byte(disk2);
 }
 
 bool apple2_woz_parse(apple2_woz_image_t *woz, const uint8_t *image, size_t image_size)
@@ -794,24 +783,41 @@ void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
 
 void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
 {
+    uint8_t drive;
     uint32_t *stream_accum;
+    uint32_t advance_bytes;
+    uint32_t *nibble_pos;
+    uint16_t track_length;
 
-    if (disk2 == NULL || cycles == 0U || cpu_hz == 0U || !disk2->motor_on ||
-        !disk2->loaded[disk2->active_drive]) {
+    if (disk2 == NULL || cycles == 0U || cpu_hz == 0U || !disk2->motor_on) {
+        return;
+    }
+    drive = disk2->active_drive;
+    if (!disk2->loaded[drive]) {
         return;
     }
     if (!disk2_prepare_track(disk2)) {
         return;
     }
+    track_length = disk2->track_cache_length;
 
-    stream_accum = &disk2->stream_accum[disk2->active_drive];
+    stream_accum = &disk2->stream_accum[drive];
     *stream_accum += APPLE2_DISK2_BYTES_PER_SECOND * cycles;
-    while (*stream_accum >= cpu_hz) {
-        *stream_accum -= cpu_hz;
-        if (!disk2_advance_data_latch(disk2)) {
-            break;
-        }
+    advance_bytes = *stream_accum / cpu_hz;
+    if (advance_bytes == 0U) {
+        return;
     }
+    *stream_accum -= advance_bytes * cpu_hz;
+
+    nibble_pos = &disk2->nibble_pos[drive];
+    if (advance_bytes >= track_length) {
+        advance_bytes %= track_length;
+    }
+    *nibble_pos += advance_bytes;
+    if (*nibble_pos >= track_length) {
+        *nibble_pos -= track_length;
+    }
+    disk2_latch_prepared_byte(disk2);
 }
 
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index)
