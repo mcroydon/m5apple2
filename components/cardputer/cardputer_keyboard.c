@@ -393,13 +393,25 @@ static void cardputer_adv_keyboard_poll(void)
         return;
     }
     count &= 0x0FU;
-    while (count-- != 0U) {
-        uint8_t event = 0;
+    if (count != 0U) {
+        uint8_t events[16];
+        uint8_t event_count = 0U;
 
-        if (cardputer_adv_read_reg(TCA8418_REG_KEY_EVENT_A, &event) != ESP_OK) {
-            break;
+        while (count-- != 0U && event_count < (uint8_t)sizeof(events)) {
+            uint8_t event = 0;
+
+            if (cardputer_adv_read_reg(TCA8418_REG_KEY_EVENT_A, &event) != ESP_OK) {
+                break;
+            }
+            events[event_count++] = event;
         }
-        cardputer_adv_handle_event(event, &pressed_mask);
+
+        /* The ADV keypad controller reports combo transitions newest-first.
+           Replay them oldest-first so modifier state is established before the
+           associated key press is translated. */
+        while (event_count-- != 0U) {
+            cardputer_adv_handle_event(events[event_count], &pressed_mask);
+        }
     }
     (void)cardputer_adv_clear_interrupts();
 }
