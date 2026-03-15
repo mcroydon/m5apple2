@@ -71,6 +71,26 @@ static spi_host_device_t cardputer_spi_host(void)
     return CONFIG_M5APPLE2_LCD_HOST_ID == 3 ? SPI3_HOST : SPI2_HOST;
 }
 
+static int cardputer_lcd_cs_pin(void)
+{
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    if (CONFIG_M5APPLE2_LCD_PIN_CS == 33 && CONFIG_M5APPLE2_LCD_PIN_RST == 37) {
+        return 37;
+    }
+#endif
+    return CONFIG_M5APPLE2_LCD_PIN_CS;
+}
+
+static int cardputer_lcd_rst_pin(void)
+{
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    if (CONFIG_M5APPLE2_LCD_PIN_CS == 33 && CONFIG_M5APPLE2_LCD_PIN_RST == 37) {
+        return 33;
+    }
+#endif
+    return CONFIG_M5APPLE2_LCD_PIN_RST;
+}
+
 static const char *TAG = "cardputer_display";
 static uint16_t s_framebuffer[CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT];
 
@@ -212,12 +232,17 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
     memset(display, 0, sizeof(*display));
     display->native_width = CONFIG_M5APPLE2_LCD_WIDTH;
     display->native_height = CONFIG_M5APPLE2_LCD_HEIGHT;
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    if (CONFIG_M5APPLE2_LCD_PIN_CS == 33 && CONFIG_M5APPLE2_LCD_PIN_RST == 37) {
+        ESP_LOGW(TAG, "ADV LCD config has legacy CS/RST pins, correcting to cs=37 rst=33");
+    }
+#endif
     ESP_LOGI(TAG,
              "LCD cfg host=%d cs=%d dc=%d rst=%d bklt=%d gap=%d,%d swap=%d mirror=%d,%d aspect=%d margin=%d,%d,%d,%d",
              CONFIG_M5APPLE2_LCD_HOST_ID,
-             CONFIG_M5APPLE2_LCD_PIN_CS,
+             cardputer_lcd_cs_pin(),
              CONFIG_M5APPLE2_LCD_PIN_DC,
-             CONFIG_M5APPLE2_LCD_PIN_RST,
+             cardputer_lcd_rst_pin(),
              CONFIG_M5APPLE2_LCD_PIN_BKLT,
              CONFIG_M5APPLE2_LCD_OFFSET_X,
              CONFIG_M5APPLE2_LCD_OFFSET_Y,
@@ -246,7 +271,7 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
 
     const esp_lcd_panel_io_spi_config_t io_config = {
         .dc_gpio_num = CONFIG_M5APPLE2_LCD_PIN_DC,
-        .cs_gpio_num = CONFIG_M5APPLE2_LCD_PIN_CS,
+        .cs_gpio_num = cardputer_lcd_cs_pin(),
         .pclk_hz = 40 * 1000 * 1000,
         .spi_mode = 0,
         /* The original Cardputer uses a single persistent framebuffer. Keep the LCD queue shallow
@@ -261,7 +286,7 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
                         "cardputer_display", "panel io init failed");
 
     const esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = CONFIG_M5APPLE2_LCD_PIN_RST,
+        .reset_gpio_num = cardputer_lcd_rst_pin(),
         .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_RGB,
         .bits_per_pixel = 16,
     };

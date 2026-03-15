@@ -38,7 +38,7 @@ config M5APPLE2_LCD_PIN_CLK
 config M5APPLE2_LCD_PIN_CS
     int "LCD CS pin"
     default 37 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
-    default 33
+    default 37
 
 config M5APPLE2_LCD_PIN_DC
     int "LCD D/C pin"
@@ -47,7 +47,7 @@ config M5APPLE2_LCD_PIN_DC
 config M5APPLE2_LCD_PIN_RST
     int "LCD reset pin"
     default 33 if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
-    default 37
+    default 33
 
 config M5APPLE2_LCD_PIN_BKLT
     int "LCD backlight pin"
