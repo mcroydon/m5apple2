@@ -32,12 +32,23 @@ typedef struct {
     int64_t window_start_us;
     uint64_t emulated_cycles;
     uint64_t cpu_step_us;
+    uint64_t cpu_step_disk_us;
+    uint64_t cpu_step_idle_us;
     uint64_t frame_compose_us;
     uint64_t frame_present_us;
+    uint64_t dsk_probe_us;
+    uint64_t sd_mount_us;
     uint32_t frames_presented;
     uint32_t text_frames;
     uint32_t text_frames_skipped;
     uint32_t graphics_frames;
+    uint32_t dsk_probes;
+    uint32_t sd_mounts;
+    uint32_t disk_active_slices;
+    uint32_t idle_slices;
+    uint32_t drive_change_slices;
+    uint32_t quarter_track_change_slices;
+    uint32_t nibble_progress_slices;
 } app_perf_counters_t;
 
 static app_perf_counters_t s_perf;
@@ -1640,6 +1651,7 @@ static bool app_sd_probe_file_order(const char *path)
         .image_size = APPLE2_DISK2_IMAGE_SIZE,
     };
     app_disk_order_t order = APP_DISK_ORDER_DOS33;
+    const int64_t start_us = esp_timer_get_time();
 
     probe.file = fopen(path, "rb");
     if (probe.file == NULL) {
@@ -1654,6 +1666,8 @@ static bool app_sd_probe_file_order(const char *path)
 #endif
     fclose(probe.file);
     free(probe.sector_track_data);
+    s_perf.dsk_probe_us += (uint64_t)(esp_timer_get_time() - start_us);
+    s_perf.dsk_probes++;
     return order == APP_DISK_ORDER_PRODOS;
 }
 
@@ -1715,6 +1729,7 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     const app_sd_disk_entry_t *disk;
     apple2_disk2_image_order_t image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
     bool attached = false;
+    const int64_t mount_start_us = esp_timer_get_time();
 
     if (drive_index >= 2U || disk_index >= s_sd_disk_count) {
         return false;
@@ -1802,6 +1817,8 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     }
 
     s_sd_drive_index[drive_index] = (int)disk_index;
+    s_perf.sd_mount_us += (uint64_t)(esp_timer_get_time() - mount_start_us);
+    s_perf.sd_mounts++;
     switch (disk->type) {
     case APP_DISK_IMAGE_PO:
     case APP_DISK_IMAGE_DSK:
@@ -2155,6 +2172,10 @@ static void app_perf_log_if_due(int64_t now_us)
                              : 0U;
         const uint32_t cpu_pct =
             (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t cpu_disk_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_disk_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+        const uint32_t cpu_idle_pct =
+            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_idle_us * 100ULL / (uint64_t)elapsed_us) : 0U;
         const uint32_t compose_pct =
             (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
         const uint32_t present_pct =
@@ -2177,6 +2198,21 @@ static void app_perf_log_if_due(int64_t now_us)
                  s_perf.text_frames,
                  s_perf.text_frames_skipped,
                  s_perf.graphics_frames);
+        ESP_LOGI(TAG,
+                 "perf path disk_cpu=%" PRIu32 "%% idle_cpu=%" PRIu32 "%% act=%" PRIu32
+                 " idle=%" PRIu32 " drv=%" PRIu32 " qt=%" PRIu32 " nib=%" PRIu32
+                 " probe=%" PRIu32 "ms/%" PRIu32 " mount=%" PRIu32 "ms/%" PRIu32,
+                 cpu_disk_pct,
+                 cpu_idle_pct,
+                 s_perf.disk_active_slices,
+                 s_perf.idle_slices,
+                 s_perf.drive_change_slices,
+                 s_perf.quarter_track_change_slices,
+                 s_perf.nibble_progress_slices,
+                 (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
+                 s_perf.dsk_probes,
+                 (uint32_t)(s_perf.sd_mount_us / 1000ULL),
+                 s_perf.sd_mounts);
     }
 
     app_perf_reset(now_us);
@@ -2280,11 +2316,40 @@ void app_main(void)
                                                 ? max_step_slice_cycles
                                                 : (uint32_t)cpu_cycle_credit;
                     const uint64_t previous_cycles = s_machine.total_cycles;
+                    const bool motor_before = s_machine.disk2.motor_on;
+                    const uint8_t drive_before = s_machine.disk2.active_drive;
+                    const uint8_t quarter_track_before = s_machine.disk2.quarter_track[drive_before];
+                    const uint32_t nibble_before = s_machine.disk2.nibble_pos[drive_before];
+                    const int64_t slice_start_us = esp_timer_get_time();
                     uint64_t executed_cycles;
 
                     apple2_machine_step(&s_machine, budget);
                     executed_cycles = s_machine.total_cycles - previous_cycles;
                     s_perf.emulated_cycles += executed_cycles;
+                    {
+                        const bool motor_after = s_machine.disk2.motor_on;
+                        const uint8_t drive_after = s_machine.disk2.active_drive;
+                        const uint8_t quarter_track_after = s_machine.disk2.quarter_track[drive_after];
+                        const uint32_t nibble_after = s_machine.disk2.nibble_pos[drive_after];
+                        const uint64_t step_us = (uint64_t)(esp_timer_get_time() - slice_start_us);
+
+                        if (motor_before || motor_after) {
+                            s_perf.cpu_step_disk_us += step_us;
+                            s_perf.disk_active_slices++;
+                        } else {
+                            s_perf.cpu_step_idle_us += step_us;
+                            s_perf.idle_slices++;
+                        }
+                        if (drive_before != drive_after) {
+                            s_perf.drive_change_slices++;
+                        }
+                        if (drive_before != drive_after || quarter_track_before != quarter_track_after) {
+                            s_perf.quarter_track_change_slices++;
+                        }
+                        if (drive_before != drive_after || nibble_before != nibble_after) {
+                            s_perf.nibble_progress_slices++;
+                        }
+                    }
                     if (executed_cycles >= cpu_cycle_credit) {
                         cpu_cycle_credit = 0U;
                     } else {
