@@ -91,6 +91,26 @@ static int cardputer_lcd_rst_pin(void)
     return CONFIG_M5APPLE2_LCD_PIN_RST;
 }
 
+static bool cardputer_lcd_mirror_x(void)
+{
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    if (!M5APPLE2_LCD_MIRROR_X_VALUE && M5APPLE2_LCD_MIRROR_Y_VALUE) {
+        return true;
+    }
+#endif
+    return M5APPLE2_LCD_MIRROR_X_VALUE;
+}
+
+static bool cardputer_lcd_mirror_y(void)
+{
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    if (!M5APPLE2_LCD_MIRROR_X_VALUE && M5APPLE2_LCD_MIRROR_Y_VALUE) {
+        return false;
+    }
+#endif
+    return M5APPLE2_LCD_MIRROR_Y_VALUE;
+}
+
 static const char *TAG = "cardputer_display";
 static uint16_t s_framebuffer[CONFIG_M5APPLE2_LCD_WIDTH * CONFIG_M5APPLE2_LCD_HEIGHT];
 
@@ -236,6 +256,9 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
     if (CONFIG_M5APPLE2_LCD_PIN_CS == 33 && CONFIG_M5APPLE2_LCD_PIN_RST == 37) {
         ESP_LOGW(TAG, "ADV LCD config has legacy CS/RST pins, correcting to cs=37 rst=33");
     }
+    if (!M5APPLE2_LCD_MIRROR_X_VALUE && M5APPLE2_LCD_MIRROR_Y_VALUE) {
+        ESP_LOGW(TAG, "ADV LCD config has legacy mirror settings, correcting to mirror=1,0");
+    }
 #endif
     ESP_LOGI(TAG,
              "LCD cfg host=%d cs=%d dc=%d rst=%d bklt=%d gap=%d,%d swap=%d mirror=%d,%d aspect=%d margin=%d,%d,%d,%d",
@@ -247,8 +270,8 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
              CONFIG_M5APPLE2_LCD_OFFSET_X,
              CONFIG_M5APPLE2_LCD_OFFSET_Y,
              M5APPLE2_LCD_SWAP_XY_VALUE ? 1 : 0,
-             M5APPLE2_LCD_MIRROR_X_VALUE ? 1 : 0,
-             M5APPLE2_LCD_MIRROR_Y_VALUE ? 1 : 0,
+             cardputer_lcd_mirror_x() ? 1 : 0,
+             cardputer_lcd_mirror_y() ? 1 : 0,
              M5APPLE2_LCD_PRESERVE_ASPECT_VALUE ? 1 : 0,
              CONFIG_M5APPLE2_LCD_MARGIN_LEFT,
              CONFIG_M5APPLE2_LCD_MARGIN_RIGHT,
@@ -300,8 +323,8 @@ esp_err_t cardputer_display_init(cardputer_display_t *display)
     ESP_RETURN_ON_ERROR(esp_lcd_panel_swap_xy(display->panel, M5APPLE2_LCD_SWAP_XY_VALUE),
                         "cardputer_display", "panel swap failed");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_mirror(display->panel,
-                                             M5APPLE2_LCD_MIRROR_X_VALUE,
-                                             M5APPLE2_LCD_MIRROR_Y_VALUE),
+                                             cardputer_lcd_mirror_x(),
+                                             cardputer_lcd_mirror_y()),
                         "cardputer_display", "panel mirror failed");
     ESP_RETURN_ON_ERROR(esp_lcd_panel_set_gap(display->panel,
                                               CONFIG_M5APPLE2_LCD_OFFSET_X,

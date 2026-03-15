@@ -70,11 +70,13 @@ config M5APPLE2_LCD_SWAP_XY
 config M5APPLE2_LCD_MIRROR_X
     bool "Mirror LCD X"
     default y if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    default y if M5APPLE2_CARDPUTER_VARIANT_ADV
     default n
 
 config M5APPLE2_LCD_MIRROR_Y
     bool "Mirror LCD Y"
     default n if M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+    default n if M5APPLE2_CARDPUTER_VARIANT_ADV
     default y
 
 config M5APPLE2_LCD_PRESERVE_ASPECT
