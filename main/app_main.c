@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "driver/sdspi_host.h"
+#include "driver/spi_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_vfs_fat.h"
@@ -108,6 +109,7 @@ extern const uint8_t dos_3_3_woz_end[] asm("_binary_dos_3_3_woz_end");
 #define APP_DSK_PROBE_FALLBACK_INSTRUCTIONS 3000000U
 #define APP_SD_MOUNT_POINT "/sd"
 #define APP_PERF_LOG_INTERVAL_US ((int64_t)CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS * 1000LL)
+#define APP_SD_MOUNT_RETRY_DELAY_MS 25
 
 typedef enum {
     APP_DISK_ORDER_DOS33 = 0,
@@ -239,6 +241,11 @@ static void app_sd_rescan(void);
 static void app_sd_cycle_dsk_order(unsigned drive_index);
 static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t override);
 static void app_text_cache_reset(void);
+static bool app_sd_try_mount_filesystem(spi_host_device_t host_id,
+                                        const spi_bus_config_t *bus_config,
+                                        const esp_vfs_fat_sdmmc_mount_config_t *mount_config,
+                                        int max_freq_khz,
+                                        esp_err_t *err_out);
 
 #if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
 static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
@@ -1528,6 +1535,45 @@ static int app_sd_disk_compare(const void *lhs, const void *rhs)
     return strcasecmp(left->name, right->name);
 }
 
+static bool app_sd_try_mount_filesystem(spi_host_device_t host_id,
+                                        const spi_bus_config_t *bus_config,
+                                        const esp_vfs_fat_sdmmc_mount_config_t *mount_config,
+                                        int max_freq_khz,
+                                        esp_err_t *err_out)
+{
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    esp_err_t err;
+
+    err = spi_bus_initialize(host_id, bus_config, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        if (err_out != NULL) {
+            *err_out = err;
+        }
+        return false;
+    }
+
+    host.slot = host_id;
+    host.max_freq_khz = max_freq_khz;
+    slot_config.host_id = host_id;
+    slot_config.gpio_cs = CONFIG_M5APPLE2_SD_PIN_CS;
+
+    ESP_LOGI(TAG,
+             "SD init host=%d cs=%d mosi=%d miso=%d clk=%d freq=%dkHz",
+             (int)host_id,
+             CONFIG_M5APPLE2_SD_PIN_CS,
+             CONFIG_M5APPLE2_SD_PIN_MOSI,
+             CONFIG_M5APPLE2_SD_PIN_MISO,
+             CONFIG_M5APPLE2_SD_PIN_CLK,
+             max_freq_khz);
+
+    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_config, mount_config, &s_sd_card);
+    if (err_out != NULL) {
+        *err_out = err;
+    }
+    return err == ESP_OK;
+}
+
 static bool app_sd_mount_filesystem(void)
 {
 #if !CONFIG_M5APPLE2_SD_ENABLE
@@ -1547,33 +1593,31 @@ static bool app_sd_mount_filesystem(void)
         .max_files = 4,
         .allocation_unit_size = 16 * 1024,
     };
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     esp_err_t err;
+    static const int s_sd_init_freqs_khz[] = { 20000, 10000, 4000, 1000 };
 
     if (s_sd_mounted) {
         return true;
     }
 
-    err = spi_bus_initialize(host_id, &bus_config, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "SD SPI bus init failed: %s", esp_err_to_name(err));
-        return false;
+    s_sd_card = NULL;
+    for (size_t i = 0; i < (sizeof(s_sd_init_freqs_khz) / sizeof(s_sd_init_freqs_khz[0])); ++i) {
+        const int freq_khz = s_sd_init_freqs_khz[i];
+
+        if (app_sd_try_mount_filesystem(host_id, &bus_config, &mount_config, freq_khz, &err)) {
+            s_sd_mounted = true;
+            ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
+            return true;
+        }
+
+        ESP_LOGW(TAG, "SD mount attempt failed at %dkHz: %s", freq_khz, esp_err_to_name(err));
+        s_sd_card = NULL;
+        (void)spi_bus_free(host_id);
+        vTaskDelay(pdMS_TO_TICKS(APP_SD_MOUNT_RETRY_DELAY_MS));
     }
 
-    host.slot = host_id;
-    slot_config.host_id = host_id;
-    slot_config.gpio_cs = CONFIG_M5APPLE2_SD_PIN_CS;
-
-    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SD mount failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    s_sd_mounted = true;
-    ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
-    return true;
+    ESP_LOGW(TAG, "SD mount failed: %s", esp_err_to_name(err));
+    return false;
 #endif
 }
 
