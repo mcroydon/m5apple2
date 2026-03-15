@@ -118,22 +118,40 @@ static bool cardputer_keymap_modifier_active(uint64_t pressed_mask, cardputer_ke
     return (pressed_mask & cardputer_keymap_mask_for_coord(coord)) != 0U;
 }
 
+static bool cardputer_keymap_ctrl_modifier_active(uint64_t pressed_mask)
+{
+#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    /* On the ADV, the current matrix decode places the physical Fn key on the
+       original Ctrl coordinate and the physical Ctrl key on the original Fn
+       coordinate. Treat them as swapped until the ADV matrix is decoded more
+       precisely. */
+    return cardputer_keymap_modifier_active(pressed_mask,
+                                            (cardputer_keycoord_t){ .row = 2U, .column = 0U });
+#else
+    return cardputer_keymap_modifier_active(pressed_mask,
+                                            (cardputer_keycoord_t){ .row = 3U, .column = 0U });
+#endif
+}
+
 static bool cardputer_keymap_command_modifier_active(uint64_t pressed_mask)
 {
+#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
     if (cardputer_keymap_modifier_active(pressed_mask,
-                                         (cardputer_keycoord_t){ .row = 2U, .column = 0U })) {
+                                         (cardputer_keycoord_t){ .row = 3U, .column = 0U })) {
         return true;
     }
 
-#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
-    /* The ADV keyboard matrix matches normal character keys, but its Fn key can
-       present on a neighboring modifier coordinate with the current mapping.
-       Accept the adjacent Option/Alt positions as command modifiers there so
-       device hotkeys stay usable without affecting the original Cardputer. */
+    /* Keep tolerating the neighboring modifier positions on ADV until the
+       matrix decode is fully validated on hardware. */
     if (cardputer_keymap_modifier_active(pressed_mask,
                                          (cardputer_keycoord_t){ .row = 3U, .column = 1U }) ||
         cardputer_keymap_modifier_active(pressed_mask,
                                          (cardputer_keycoord_t){ .row = 3U, .column = 2U })) {
+        return true;
+    }
+#else
+    if (cardputer_keymap_modifier_active(pressed_mask,
+                                         (cardputer_keycoord_t){ .row = 2U, .column = 0U })) {
         return true;
     }
 #endif
@@ -290,8 +308,7 @@ bool cardputer_keymap_ascii_for_press(uint64_t pressed_mask,
 
     shift = cardputer_keymap_modifier_active(pressed_mask,
                                              (cardputer_keycoord_t){ .row = 2U, .column = 1U });
-    ctrl = cardputer_keymap_modifier_active(pressed_mask,
-                                            (cardputer_keycoord_t){ .row = 3U, .column = 0U });
+    ctrl = cardputer_keymap_ctrl_modifier_active(pressed_mask);
     fn = cardputer_keymap_command_modifier_active(pressed_mask);
 
     switch (key->kind) {
