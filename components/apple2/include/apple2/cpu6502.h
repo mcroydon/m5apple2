@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "apple2/apple2_disk2.h"
+
 enum {
     CPU6502_FLAG_CARRY = 0x01,
     CPU6502_FLAG_ZERO = 0x02,
@@ -22,6 +24,7 @@ typedef struct {
     void *context;
     uint8_t *memory;
     uint8_t *data_latch;
+    apple2_disk2_t *disk2;
     cpu6502_read_fn read;
     cpu6502_write_fn write;
 } cpu6502_bus_t;

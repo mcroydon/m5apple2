@@ -12,6 +12,13 @@ static inline uint8_t cpu_read(cpu6502_t *cpu, uint16_t address)
         }
         return value;
     }
+    if (cpu->bus.disk2 != NULL && address >= 0xC0E0U && address <= 0xC0EFU) {
+        const uint8_t value = apple2_disk2_access(cpu->bus.disk2, (uint8_t)(address & 0x0FU));
+        if (cpu->bus.data_latch != NULL) {
+            *cpu->bus.data_latch = value;
+        }
+        return value;
+    }
     return cpu->bus.read(cpu->bus.context, address);
 }
 
@@ -22,6 +29,13 @@ static inline void cpu_write(cpu6502_t *cpu, uint16_t address, uint8_t value)
         if (cpu->bus.data_latch != NULL) {
             *cpu->bus.data_latch = value;
         }
+        return;
+    }
+    if (cpu->bus.disk2 != NULL && address >= 0xC0E0U && address <= 0xC0EFU) {
+        if (cpu->bus.data_latch != NULL) {
+            *cpu->bus.data_latch = value;
+        }
+        (void)apple2_disk2_access(cpu->bus.disk2, (uint8_t)(address & 0x0FU));
         return;
     }
     cpu->bus.write(cpu->bus.context, address, value);
