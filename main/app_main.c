@@ -28,7 +28,7 @@
 
 static const char *TAG = "m5apple2";
 static apple2_machine_t s_machine;
-static apple2_machine_t s_probe_machine;
+static apple2_machine_t *s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 typedef struct {
@@ -351,10 +351,19 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
                                       uint32_t instruction_limit,
                                       app_dsk_probe_result_t *result)
 {
-    apple2_machine_t *probe = &s_probe_machine;
+    apple2_machine_t *probe;
     bool entered_stage2 = false;
 
-    /* A full probe machine is too large for the ESP-IDF main task stack. */
+    if (s_probe_machine == NULL) {
+        s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
+        if (s_probe_machine == NULL) {
+            return INT_MIN / 2;
+        }
+    }
+    probe = s_probe_machine;
+
+    /* A full probe machine is too large for the ESP-IDF main task stack. Keep
+       the reusable probe machine on the heap instead of in .bss or on stack. */
     apple2_machine_init(probe, &(apple2_config_t){ .cpu_hz = CONFIG_M5APPLE2_CPU_HZ });
     if (!apple2_machine_load_system_rom(probe,
                                         apple2plus_rom_start,
