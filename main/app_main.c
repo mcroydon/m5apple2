@@ -441,6 +441,40 @@ static bool app_dsk_probe_result_is_advanced_loader(const app_dsk_probe_result_t
             (result->pc >= 0x0200U && result->pc < 0xC600U));
 }
 
+static int app_dsk_probe_result_progress_rank(const app_dsk_probe_result_t *result)
+{
+    int rank = 0;
+
+    if (result == NULL) {
+        return INT_MIN / 4;
+    }
+    if (app_dsk_probe_result_is_advanced_loader(result)) {
+        rank += 4;
+    }
+    if (result->entered_stage2) {
+        rank += 4;
+    }
+    if (result->quarter_track >= 4U) {
+        rank += 2;
+    }
+    if (result->nibble_pos > 384U) {
+        rank += 1;
+    }
+    if (result->pc >= 0xB000U && result->pc < 0xC000U) {
+        rank += 2;
+    } else if (result->pc >= 0x0200U && result->pc < 0xC600U) {
+        rank += 1;
+    }
+    if (app_dsk_probe_result_is_monitor_fallback(result)) {
+        rank -= 4;
+    }
+    if (app_dsk_probe_result_is_slot6_stall(result)) {
+        rank -= 2;
+    }
+
+    return rank;
+}
+
 static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *source)
 {
     app_dsk_probe_result_t dos_result = { 0 };
@@ -471,6 +505,30 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
                  prodos_result.pc,
                  prodos_result.quarter_track,
                  prodos_result.nibble_pos);
+    }
+
+    {
+        const int dos_rank = app_dsk_probe_result_progress_rank(&dos_result);
+        const int prodos_rank = app_dsk_probe_result_progress_rank(&prodos_result);
+
+        if (dos_rank > prodos_rank) {
+            ESP_LOGI(TAG,
+                     "Probed .dsk order: dos=%d prodos=%d (DOS progress wins %d>%d)",
+                     dos_score,
+                     prodos_score,
+                     dos_rank,
+                     prodos_rank);
+            return APP_DISK_ORDER_DOS33;
+        }
+        if (prodos_rank > dos_rank) {
+            ESP_LOGI(TAG,
+                     "Probed .dsk order: dos=%d prodos=%d (ProDOS progress wins %d>%d)",
+                     dos_score,
+                     prodos_score,
+                     prodos_rank,
+                     dos_rank);
+            return APP_DISK_ORDER_PRODOS;
+        }
     }
 
     if (app_dsk_probe_result_is_advanced_loader(&dos_result) &&

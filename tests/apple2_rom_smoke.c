@@ -254,6 +254,60 @@ static disk_image_type_t disk_probe_dsk_order(const uint8_t *rom,
                                  &prodos_stage2);
     }
 
+    {
+        int dos_rank = 0;
+        int prodos_rank = 0;
+
+        if (dos_stage2 || dos_qt >= 4U || (dos_cpu.pc >= 0x0200U && dos_cpu.pc < 0xC600U)) {
+            dos_rank += 4;
+        }
+        if (dos_stage2) {
+            dos_rank += 4;
+        }
+        if (dos_qt >= 4U) {
+            dos_rank += 2;
+        }
+        if (dos_cpu.pc >= 0xB000U && dos_cpu.pc < 0xC000U) {
+            dos_rank += 2;
+        } else if (dos_cpu.pc >= 0x0200U && dos_cpu.pc < 0xC600U) {
+            dos_rank += 1;
+        }
+        if (dos_cpu.pc >= 0xFD00U && dos_qt == 0U && !dos_stage2) {
+            dos_rank -= 4;
+        }
+        if (dos_cpu.pc >= 0xC600U && dos_cpu.pc < 0xC700U && dos_qt == 0U && !dos_stage2) {
+            dos_rank -= 2;
+        }
+
+        if (prodos_stage2 || prodos_qt >= 4U || (prodos_cpu.pc >= 0x0200U && prodos_cpu.pc < 0xC600U)) {
+            prodos_rank += 4;
+        }
+        if (prodos_stage2) {
+            prodos_rank += 4;
+        }
+        if (prodos_qt >= 4U) {
+            prodos_rank += 2;
+        }
+        if (prodos_cpu.pc >= 0xB000U && prodos_cpu.pc < 0xC000U) {
+            prodos_rank += 2;
+        } else if (prodos_cpu.pc >= 0x0200U && prodos_cpu.pc < 0xC600U) {
+            prodos_rank += 1;
+        }
+        if (prodos_cpu.pc >= 0xFD00U && prodos_qt == 0U && !prodos_stage2) {
+            prodos_rank -= 4;
+        }
+        if (prodos_cpu.pc >= 0xC600U && prodos_cpu.pc < 0xC700U && prodos_qt == 0U && !prodos_stage2) {
+            prodos_rank -= 2;
+        }
+
+        if (dos_rank > prodos_rank) {
+            return DISK_IMAGE_DSK_DOS_ORDER;
+        }
+        if (prodos_rank > dos_rank) {
+            return DISK_IMAGE_DSK_PRODOS_ORDER;
+        }
+    }
+
     if ((dos_stage2 || dos_qt >= 4U || (dos_cpu.pc >= 0x0200U && dos_cpu.pc < 0xC600U)) &&
         prodos_cpu.pc >= 0xFD00U &&
         prodos_qt == 0U &&
