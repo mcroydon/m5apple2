@@ -37,7 +37,6 @@ typedef struct {
     uint32_t speaker_toggles;
     apple2_video_state_t video;
     apple2_disk2_t disk2;
-    uint64_t instruction_count;
     uint16_t system_rom_base;
     size_t system_rom_size;
     uint32_t flash_half_period_cycles;

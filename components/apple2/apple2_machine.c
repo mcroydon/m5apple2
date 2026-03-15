@@ -419,7 +419,6 @@ void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
 uint32_t apple2_machine_step_instruction(apple2_machine_t *machine)
 {
     const uint32_t cycles = cpu6502_step(&machine->cpu);
-    machine->instruction_count++;
     machine->total_cycles = machine->cpu.total_cycles;
     apple2_disk2_tick(&machine->disk2, machine->config.cpu_hz, cycles);
     apple2_machine_tick_flash(machine, cycles);

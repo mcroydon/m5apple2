@@ -48,20 +48,6 @@ typedef struct {
 } apple2_woz_image_t;
 
 typedef struct {
-    uint64_t tick_calls;
-    uint64_t tick_cycles;
-    uint64_t bytes_latched;
-    uint64_t track_cache_hits;
-    uint64_t track_cache_misses;
-    uint64_t sector_track_builds;
-    uint64_t sector_reader_calls;
-    uint64_t track_reader_calls;
-    uint64_t phase_transitions;
-    uint64_t drive_switches;
-    uint64_t motor_starts;
-} apple2_disk2_profile_t;
-
-typedef struct {
     bool loaded[2];
     apple2_disk2_source_kind_t source_kind[2];
     const uint8_t *image[2];
@@ -87,7 +73,6 @@ typedef struct {
     uint8_t track_cache_key;
     uint16_t track_cache_length;
     uint8_t track_cache[APPLE2_DISK2_MAX_TRACK_BYTES];
-    apple2_disk2_profile_t profile;
 } apple2_disk2_t;
 
 bool apple2_woz_parse(apple2_woz_image_t *woz, const uint8_t *image, size_t image_size);
