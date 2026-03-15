@@ -49,6 +49,8 @@ typedef struct {
     uint32_t drive_change_slices;
     uint32_t quarter_track_change_slices;
     uint32_t nibble_progress_slices;
+    uint64_t nibble_advance_bytes;
+    uint32_t nibble_wrap_slices;
 } app_perf_counters_t;
 
 static app_perf_counters_t s_perf;
@@ -2201,6 +2203,7 @@ static void app_perf_log_if_due(int64_t now_us)
         ESP_LOGI(TAG,
                  "perf path disk_cpu=%" PRIu32 "%% idle_cpu=%" PRIu32 "%% act=%" PRIu32
                  " idle=%" PRIu32 " drv=%" PRIu32 " qt=%" PRIu32 " nib=%" PRIu32
+                 " adv=%" PRIu64 " wrap=%" PRIu32
                  " probe=%" PRIu32 "ms/%" PRIu32 " mount=%" PRIu32 "ms/%" PRIu32,
                  cpu_disk_pct,
                  cpu_idle_pct,
@@ -2209,6 +2212,8 @@ static void app_perf_log_if_due(int64_t now_us)
                  s_perf.drive_change_slices,
                  s_perf.quarter_track_change_slices,
                  s_perf.nibble_progress_slices,
+                 s_perf.nibble_advance_bytes,
+                 s_perf.nibble_wrap_slices,
                  (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
                  s_perf.dsk_probes,
                  (uint32_t)(s_perf.sd_mount_us / 1000ULL),
@@ -2331,6 +2336,7 @@ void app_main(void)
                         const uint8_t drive_after = s_machine.disk2.active_drive;
                         const uint8_t quarter_track_after = s_machine.disk2.quarter_track[drive_after];
                         const uint32_t nibble_after = s_machine.disk2.nibble_pos[drive_after];
+                        const uint16_t track_length = s_machine.disk2.track_cache_length;
                         const uint64_t step_us = (uint64_t)(esp_timer_get_time() - slice_start_us);
 
                         if (motor_before || motor_after) {
@@ -2348,6 +2354,19 @@ void app_main(void)
                         }
                         if (drive_before != drive_after || nibble_before != nibble_after) {
                             s_perf.nibble_progress_slices++;
+                        }
+                        if ((motor_before || motor_after) &&
+                            drive_before == drive_after &&
+                            quarter_track_before == quarter_track_after &&
+                            track_length != 0U &&
+                            nibble_before != nibble_after) {
+                            if (nibble_after > nibble_before) {
+                                s_perf.nibble_advance_bytes += (uint64_t)(nibble_after - nibble_before);
+                            } else {
+                                s_perf.nibble_advance_bytes +=
+                                    (uint64_t)((uint32_t)track_length - nibble_before + nibble_after);
+                                s_perf.nibble_wrap_slices++;
+                            }
                         }
                     }
                     if (executed_cycles >= cpu_cycle_credit) {
