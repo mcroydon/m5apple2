@@ -4,11 +4,26 @@
 
 static inline uint8_t cpu_read(cpu6502_t *cpu, uint16_t address)
 {
+    if (cpu->bus.memory != NULL &&
+        (address < 0xC000U || (address >= 0xC800U && address != 0xCFFFU))) {
+        const uint8_t value = cpu->bus.memory[address];
+        if (cpu->bus.data_latch != NULL) {
+            *cpu->bus.data_latch = value;
+        }
+        return value;
+    }
     return cpu->bus.read(cpu->bus.context, address);
 }
 
 static inline void cpu_write(cpu6502_t *cpu, uint16_t address, uint8_t value)
 {
+    if (cpu->bus.memory != NULL && address < 0xC000U) {
+        cpu->bus.memory[address] = value;
+        if (cpu->bus.data_latch != NULL) {
+            *cpu->bus.data_latch = value;
+        }
+        return;
+    }
     cpu->bus.write(cpu->bus.context, address, value);
 }
 

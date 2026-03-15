@@ -20,6 +20,8 @@ typedef void (*cpu6502_write_fn)(void *context, uint16_t address, uint8_t value)
 
 typedef struct {
     void *context;
+    uint8_t *memory;
+    uint8_t *data_latch;
     cpu6502_read_fn read;
     cpu6502_write_fn write;
 } cpu6502_bus_t;
@@ -44,4 +46,3 @@ void cpu6502_request_irq(cpu6502_t *cpu);
 void cpu6502_request_nmi(cpu6502_t *cpu);
 void cpu6502_clear_irq(cpu6502_t *cpu);
 void cpu6502_set_pc(cpu6502_t *cpu, uint16_t address);
-

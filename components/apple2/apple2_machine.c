@@ -254,6 +254,8 @@ void apple2_machine_init(apple2_machine_t *machine, const apple2_config_t *confi
 {
     cpu6502_bus_t bus = {
         .context = machine,
+        .memory = machine->memory,
+        .data_latch = &machine->floating_bus,
         .read = apple2_bus_read,
         .write = apple2_bus_write,
     };
