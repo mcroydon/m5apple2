@@ -131,6 +131,7 @@ config M5APPLE2_SD_ENABLE
 config M5APPLE2_SD_HOST_ID
     int "SD SPI host"
     depends on M5APPLE2_SD_ENABLE
+    default 3 if M5APPLE2_CARDPUTER_VARIANT_ADV
     default 2
 
 config M5APPLE2_SD_PIN_MOSI

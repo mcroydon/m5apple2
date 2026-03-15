@@ -31,6 +31,7 @@ static apple2_machine_t s_machine;
 static apple2_machine_t *s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
+static spi_host_device_t app_sd_spi_host(void);
 typedef struct {
     int64_t window_start_us;
     uint64_t emulated_cycles;
@@ -1540,7 +1541,7 @@ static bool app_sd_mount_filesystem(void)
 #if !CONFIG_M5APPLE2_SD_ENABLE
     return false;
 #else
-    const spi_host_device_t host_id = (CONFIG_M5APPLE2_SD_HOST_ID == 3) ? SPI3_HOST : SPI2_HOST;
+    const spi_host_device_t host_id = app_sd_spi_host();
     const spi_bus_config_t bus_config = {
         .mosi_io_num = CONFIG_M5APPLE2_SD_PIN_MOSI,
         .miso_io_num = CONFIG_M5APPLE2_SD_PIN_MISO,
@@ -1696,6 +1697,28 @@ static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t ov
     default:
         return "auto";
     }
+}
+
+static spi_host_device_t app_sd_spi_host(void)
+{
+    spi_host_device_t host_id = (CONFIG_M5APPLE2_SD_HOST_ID == 3) ? SPI3_HOST : SPI2_HOST;
+    const spi_host_device_t lcd_host_id = (CONFIG_M5APPLE2_LCD_HOST_ID == 3) ? SPI3_HOST : SPI2_HOST;
+    const bool pins_match = CONFIG_M5APPLE2_SD_PIN_MOSI == CONFIG_M5APPLE2_LCD_PIN_MOSI &&
+                            CONFIG_M5APPLE2_SD_PIN_CLK == CONFIG_M5APPLE2_LCD_PIN_CLK &&
+                            CONFIG_M5APPLE2_SD_PIN_CS == CONFIG_M5APPLE2_LCD_PIN_CS;
+
+    if (host_id == lcd_host_id && !pins_match) {
+        const spi_host_device_t fallback = (lcd_host_id == SPI3_HOST) ? SPI2_HOST : SPI3_HOST;
+
+        ESP_LOGW(TAG,
+                 "SD SPI host %d conflicts with LCD host %d on different pins, using host %d",
+                 (int)host_id,
+                 (int)lcd_host_id,
+                 (int)fallback);
+        host_id = fallback;
+    }
+
+    return host_id;
 }
 
 static const char *app_speed_mode_name(void)
