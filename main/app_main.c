@@ -212,8 +212,14 @@ static const uint8_t s_prodos_track_order[16] = {
     0x1, 0x3, 0x5, 0x7, 0x9, 0xB, 0xD, 0xF,
 };
 
-static const uint8_t s_speed_multipliers[] = { 1U, 2U, 4U };
-static size_t s_speed_multiplier_index;
+typedef enum {
+    APP_SPEED_MODE_1X = 0,
+    APP_SPEED_MODE_2X,
+    APP_SPEED_MODE_4X,
+    APP_SPEED_MODE_AUTO_DISK,
+} app_speed_mode_t;
+
+static app_speed_mode_t s_speed_mode = APP_SPEED_MODE_1X;
 
 static bool app_restore_builtin_drive(unsigned drive_index);
 static void app_sd_close_drive(unsigned drive_index);
@@ -1664,16 +1670,44 @@ static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t ov
     }
 }
 
+static const char *app_speed_mode_name(void)
+{
+    switch (s_speed_mode) {
+    case APP_SPEED_MODE_2X:
+        return "2x";
+    case APP_SPEED_MODE_4X:
+        return "4x";
+    case APP_SPEED_MODE_AUTO_DISK:
+        return "auto";
+    case APP_SPEED_MODE_1X:
+    default:
+        return "1x";
+    }
+}
+
 static uint8_t app_speed_multiplier(void)
 {
-    return s_speed_multipliers[s_speed_multiplier_index];
+    switch (s_speed_mode) {
+    case APP_SPEED_MODE_2X:
+        return 2U;
+    case APP_SPEED_MODE_4X:
+        return 4U;
+    case APP_SPEED_MODE_AUTO_DISK:
+        return s_machine.disk2.motor_on ? 4U : 1U;
+    case APP_SPEED_MODE_1X:
+    default:
+        return 1U;
+    }
 }
 
 static void app_toggle_speed_multiplier(void)
 {
-    s_speed_multiplier_index = (s_speed_multiplier_index + 1U) %
-                               (sizeof(s_speed_multipliers) / sizeof(s_speed_multipliers[0]));
-    ESP_LOGI(TAG, "Emulation speed set to %ux", (unsigned)app_speed_multiplier());
+    s_speed_mode = (app_speed_mode_t)(((unsigned)s_speed_mode + 1U) % 4U);
+    if (s_speed_mode == APP_SPEED_MODE_AUTO_DISK) {
+        ESP_LOGI(TAG, "Emulation speed set to auto (1x idle / 4x disk)");
+    } else {
+        ESP_LOGI(TAG, "Emulation speed set to %s", app_speed_mode_name());
+    }
 }
 
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
@@ -2127,11 +2161,12 @@ static void app_perf_log_if_due(int64_t now_us)
             (elapsed_us > 0) ? (uint32_t)(s_perf.frame_present_us * 100ULL / (uint64_t)elapsed_us) : 0U;
 
         ESP_LOGI(TAG,
-                 "perf apple=%" PRIu64 ".%03" PRIu64 "MHz rate=%ux fps=%" PRIu32 ".%" PRIu32
+                 "perf apple=%" PRIu64 ".%03" PRIu64 "MHz mode=%s rate=%ux fps=%" PRIu32 ".%" PRIu32
                  " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
                  "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32,
                  effective_khz / 1000ULL,
                  effective_khz % 1000ULL,
+                 app_speed_mode_name(),
                  (unsigned)app_speed_multiplier(),
                  fps_x10 / 10U,
                  fps_x10 % 10U,

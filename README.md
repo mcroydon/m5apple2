@@ -59,7 +59,8 @@ Usage:
   `Esc` cancels,
   and `Fn+5/Fn+6` switches the picker between drive 1 and drive 2.
 - On-device performance hotkey:
-  `Fn+8` cycles emulation speed between `1x`, `2x`, and `4x`.
+  `Fn+8` cycles emulation speed between `1x`, `2x`, `4x`, and `auto`
+  (`1x` while idle, `4x` while the Disk II motor is on).
 - On-device Apple II cursor hotkeys:
   `Fn+I/J/K/L` emits up/left/down/right,
   and `Fn+; , . /` provides the same directions on the punctuation cluster.
