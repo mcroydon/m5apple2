@@ -2172,6 +2172,83 @@ static void app_perf_reset(int64_t now_us)
     s_perf.disk2_profile_base = s_machine.disk2.profile;
 }
 
+static uint32_t app_perf_pct(uint64_t value_us, int64_t elapsed_us)
+{
+    return (elapsed_us > 0) ? (uint32_t)(value_us * 100ULL / (uint64_t)elapsed_us) : 0U;
+}
+
+static void app_perf_log_cpu_window(int64_t elapsed_us)
+{
+    const uint64_t instruction_delta = s_machine.instruction_count - s_perf.instruction_base;
+    const uint64_t effective_khz =
+        (elapsed_us > 0) ? (s_perf.emulated_cycles * 1000ULL) / (uint64_t)elapsed_us : 0ULL;
+    const uint32_t fps_x10 =
+        (elapsed_us > 0) ? (uint32_t)((uint64_t)s_perf.frames_presented * 10000000ULL / (uint64_t)elapsed_us)
+                         : 0U;
+    const uint32_t instruction_khz =
+        (elapsed_us > 0) ? (uint32_t)(instruction_delta * 1000ULL / (uint64_t)elapsed_us) : 0U;
+    const uint32_t cycles_per_instruction_x100 =
+        (instruction_delta > 0U) ? (uint32_t)((s_perf.emulated_cycles * 100ULL) / instruction_delta) : 0U;
+
+    ESP_LOGI(TAG,
+             "perf apple=%" PRIu64 ".%03" PRIu64 "MHz mode=%s rate=%ux fps=%" PRIu32 ".%" PRIu32
+             " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
+             "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32
+             " instr=%" PRIu32 ".%03" PRIu32 "M cpi=%" PRIu32 ".%02" PRIu32,
+             effective_khz / 1000ULL,
+             effective_khz % 1000ULL,
+             app_speed_mode_name(),
+             (unsigned)app_speed_multiplier(),
+             fps_x10 / 10U,
+             fps_x10 % 10U,
+             app_perf_pct(s_perf.cpu_step_us, elapsed_us),
+             app_perf_pct(s_perf.frame_compose_us, elapsed_us),
+             app_perf_pct(s_perf.frame_present_us, elapsed_us),
+             s_perf.frames_presented,
+             s_perf.text_frames,
+             s_perf.text_frames_skipped,
+             s_perf.graphics_frames,
+             instruction_khz / 1000U,
+             instruction_khz % 1000U,
+             cycles_per_instruction_x100 / 100U,
+             cycles_per_instruction_x100 % 100U);
+}
+
+static void app_perf_log_disk_window(int64_t elapsed_us)
+{
+    const apple2_disk2_profile_t *current_disk2 = &s_machine.disk2.profile;
+
+    ESP_LOGI(TAG,
+             "perf disk tick=%" PRIu64 " cyc=%" PRIu64 " bytes=%" PRIu64
+             " cache=%" PRIu64 "/%" PRIu64 " build=%" PRIu64
+             " rdr=%" PRIu64 " trk=%" PRIu64,
+             current_disk2->tick_calls - s_perf.disk2_profile_base.tick_calls,
+             current_disk2->tick_cycles - s_perf.disk2_profile_base.tick_cycles,
+             current_disk2->bytes_latched - s_perf.disk2_profile_base.bytes_latched,
+             current_disk2->track_cache_hits - s_perf.disk2_profile_base.track_cache_hits,
+             current_disk2->track_cache_misses - s_perf.disk2_profile_base.track_cache_misses,
+             current_disk2->sector_track_builds - s_perf.disk2_profile_base.sector_track_builds,
+             current_disk2->sector_reader_calls - s_perf.disk2_profile_base.sector_reader_calls,
+             current_disk2->track_reader_calls - s_perf.disk2_profile_base.track_reader_calls);
+    ESP_LOGI(TAG,
+             "perf io move=%" PRIu64 " drv=%" PRIu64 " mot=%" PRIu64
+             " sd_sec=%" PRIu32 "@%" PRIu32 "%% refill=%" PRIu32
+             " sd_trk=%" PRIu32 "@%" PRIu32 "%% probe=%" PRIu32 "ms/%" PRIu32
+             " mount=%" PRIu32 "ms/%" PRIu32,
+             current_disk2->phase_transitions - s_perf.disk2_profile_base.phase_transitions,
+             current_disk2->drive_switches - s_perf.disk2_profile_base.drive_switches,
+             current_disk2->motor_starts - s_perf.disk2_profile_base.motor_starts,
+             s_perf.sd_sector_reads,
+             app_perf_pct(s_perf.sd_sector_read_us, elapsed_us),
+             s_perf.sd_sector_track_refills,
+             s_perf.sd_track_reads,
+             app_perf_pct(s_perf.sd_track_read_us, elapsed_us),
+             (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
+             s_perf.dsk_probes,
+             (uint32_t)(s_perf.sd_mount_us / 1000ULL),
+             s_perf.sd_mounts);
+}
+
 static void app_perf_log_if_due(int64_t now_us)
 {
     const int64_t elapsed_us = now_us - s_perf.window_start_us;
@@ -2180,100 +2257,8 @@ static void app_perf_log_if_due(int64_t now_us)
         return;
     }
 
-    {
-        const uint64_t instruction_delta = s_machine.instruction_count - s_perf.instruction_base;
-        const apple2_disk2_profile_t *current_disk2 = &s_machine.disk2.profile;
-        const uint64_t disk_tick_calls = current_disk2->tick_calls - s_perf.disk2_profile_base.tick_calls;
-        const uint64_t disk_tick_cycles = current_disk2->tick_cycles - s_perf.disk2_profile_base.tick_cycles;
-        const uint64_t disk_bytes_latched =
-            current_disk2->bytes_latched - s_perf.disk2_profile_base.bytes_latched;
-        const uint64_t disk_track_hits =
-            current_disk2->track_cache_hits - s_perf.disk2_profile_base.track_cache_hits;
-        const uint64_t disk_track_misses =
-            current_disk2->track_cache_misses - s_perf.disk2_profile_base.track_cache_misses;
-        const uint64_t disk_sector_builds =
-            current_disk2->sector_track_builds - s_perf.disk2_profile_base.sector_track_builds;
-        const uint64_t disk_sector_reader_calls =
-            current_disk2->sector_reader_calls - s_perf.disk2_profile_base.sector_reader_calls;
-        const uint64_t disk_track_reader_calls =
-            current_disk2->track_reader_calls - s_perf.disk2_profile_base.track_reader_calls;
-        const uint64_t disk_phase_moves =
-            current_disk2->phase_transitions - s_perf.disk2_profile_base.phase_transitions;
-        const uint64_t disk_drive_switches =
-            current_disk2->drive_switches - s_perf.disk2_profile_base.drive_switches;
-        const uint64_t disk_motor_starts =
-            current_disk2->motor_starts - s_perf.disk2_profile_base.motor_starts;
-        const uint64_t effective_khz =
-            (elapsed_us > 0) ? (s_perf.emulated_cycles * 1000ULL) / (uint64_t)elapsed_us : 0ULL;
-        const uint32_t fps_x10 =
-            (elapsed_us > 0) ? (uint32_t)((uint64_t)s_perf.frames_presented * 10000000ULL / (uint64_t)elapsed_us)
-                             : 0U;
-        const uint32_t cpu_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t compose_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t present_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_present_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t sd_sector_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.sd_sector_read_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t sd_track_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.sd_track_read_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t instruction_khz =
-            (elapsed_us > 0) ? (uint32_t)(instruction_delta * 1000ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t cycles_per_instruction_x100 =
-            (instruction_delta > 0U) ? (uint32_t)((s_perf.emulated_cycles * 100ULL) / instruction_delta) : 0U;
-
-        ESP_LOGI(TAG,
-                 "perf apple=%" PRIu64 ".%03" PRIu64 "MHz mode=%s rate=%ux fps=%" PRIu32 ".%" PRIu32
-                 " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
-                 "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32
-                 " instr=%" PRIu32 ".%03" PRIu32 "M cpi=%" PRIu32 ".%02" PRIu32,
-                 effective_khz / 1000ULL,
-                 effective_khz % 1000ULL,
-                 app_speed_mode_name(),
-                 (unsigned)app_speed_multiplier(),
-                 fps_x10 / 10U,
-                 fps_x10 % 10U,
-                 cpu_pct,
-                 compose_pct,
-                 present_pct,
-                 s_perf.frames_presented,
-                 s_perf.text_frames,
-                 s_perf.text_frames_skipped,
-                 s_perf.graphics_frames,
-                 instruction_khz / 1000U,
-                 instruction_khz % 1000U,
-                 cycles_per_instruction_x100 / 100U,
-                 cycles_per_instruction_x100 % 100U);
-        ESP_LOGI(TAG,
-                 "perf disk tick=%" PRIu64 " cyc=%" PRIu64 " bytes=%" PRIu64
-                 " cache=%" PRIu64 "/%" PRIu64 " build=%" PRIu64
-                 " rdr=%" PRIu64 " trk=%" PRIu64 " move=%" PRIu64
-                 " drv=%" PRIu64 " mot=%" PRIu64
-                 " sd_sec=%" PRIu32 "@%" PRIu32 "%% refill=%" PRIu32
-                 " sd_trk=%" PRIu32 "@%" PRIu32 "%% probe=%" PRIu32 "ms/%" PRIu32
-                 " mount=%" PRIu32 "ms/%" PRIu32,
-                 disk_tick_calls,
-                 disk_tick_cycles,
-                 disk_bytes_latched,
-                 disk_track_hits,
-                 disk_track_misses,
-                 disk_sector_builds,
-                 disk_sector_reader_calls,
-                 disk_track_reader_calls,
-                 disk_phase_moves,
-                 disk_drive_switches,
-                 disk_motor_starts,
-                 s_perf.sd_sector_reads,
-                 sd_sector_pct,
-                 s_perf.sd_sector_track_refills,
-                 s_perf.sd_track_reads,
-                 sd_track_pct,
-                 (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
-                 s_perf.dsk_probes,
-                 (uint32_t)(s_perf.sd_mount_us / 1000ULL),
-                 s_perf.sd_mounts);
-    }
+    app_perf_log_cpu_window(elapsed_us);
+    app_perf_log_disk_window(elapsed_us);
 
     app_perf_reset(now_us);
 }
