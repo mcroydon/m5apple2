@@ -120,41 +120,16 @@ static bool cardputer_keymap_modifier_active(uint64_t pressed_mask, cardputer_ke
 
 static bool cardputer_keymap_ctrl_modifier_active(uint64_t pressed_mask)
 {
-#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
-    /* On the ADV, the current matrix decode places the physical Fn key on the
-       original Ctrl coordinate and the physical Ctrl key on the original Fn
-       coordinate. Treat them as swapped until the ADV matrix is decoded more
-       precisely. */
-    return cardputer_keymap_modifier_active(pressed_mask,
-                                            (cardputer_keycoord_t){ .row = 2U, .column = 0U });
-#else
     return cardputer_keymap_modifier_active(pressed_mask,
                                             (cardputer_keycoord_t){ .row = 3U, .column = 0U });
-#endif
 }
 
 static bool cardputer_keymap_command_modifier_active(uint64_t pressed_mask)
 {
-#if defined(CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV) && CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
-    if (cardputer_keymap_modifier_active(pressed_mask,
-                                         (cardputer_keycoord_t){ .row = 3U, .column = 0U })) {
-        return true;
-    }
-
-    /* Keep tolerating the neighboring modifier positions on ADV until the
-       matrix decode is fully validated on hardware. */
-    if (cardputer_keymap_modifier_active(pressed_mask,
-                                         (cardputer_keycoord_t){ .row = 3U, .column = 1U }) ||
-        cardputer_keymap_modifier_active(pressed_mask,
-                                         (cardputer_keycoord_t){ .row = 3U, .column = 2U })) {
-        return true;
-    }
-#else
     if (cardputer_keymap_modifier_active(pressed_mask,
                                          (cardputer_keycoord_t){ .row = 2U, .column = 0U })) {
         return true;
     }
-#endif
 
     return false;
 }
