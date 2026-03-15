@@ -358,6 +358,14 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
         return;
     }
 
+    if (pressed && coord.row >= 2U && coord.column <= 2U) {
+        ESP_LOGI(TAG,
+                 "ADV modifier cluster event=0x%02x coord=%u,%u",
+                 event,
+                 (unsigned)coord.row,
+                 (unsigned)coord.column);
+    }
+
     bit = cardputer_keymap_mask_for_coord(coord);
     if (pressed) {
         *pressed_mask |= bit;
