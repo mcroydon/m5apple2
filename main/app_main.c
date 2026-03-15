@@ -459,24 +459,16 @@ static void app_boot_slot6(void)
     ESP_LOGI(TAG, "Jumped to slot 6 boot ROM");
 }
 
-static void app_clear_text_pages(void)
-{
-    memset(&s_machine.memory[APP_TEXT_SCREEN_BASE],
-           (int)(' ' | 0x80U),
-           APP_TEXT_SCREEN_BYTES);
-}
-
 static void app_reset_and_boot_slot6(bool rom_loaded)
 {
-    apple2_machine_reset(&s_machine);
     memset(s_machine.memory, 0, 0xC000U);
-    app_clear_text_pages();
-    app_text_cache_reset();
     if (!rom_loaded) {
+        app_text_cache_reset();
         app_show_status_screen("PLACE APPLE2PLUS.ROM IN", "roms/ AND REBUILD.", "RUNS WITHOUT ROM SHOW STATUS.");
         return;
     }
     apple2_machine_reset(&s_machine);
+    app_text_cache_reset();
     ESP_LOGI(TAG, "Cold reset with current drive mounts");
 }
 
