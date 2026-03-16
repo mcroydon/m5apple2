@@ -410,6 +410,9 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
     cardputer_keycoord_t coord;
     bool pressed = false;
     uint64_t bit;
+    const bool arm_before = s_adv_fn_armed;
+    const bool pending_before = s_adv_pending_press.active;
+    const uint64_t mask_before = *pressed_mask;
 
     if (!cardputer_keymap_decode_adv_event(event, &pressed, &coord)) {
         return;
@@ -451,6 +454,23 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
             cardputer_adv_emit_pending(*pressed_mask);
         }
         *pressed_mask &= ~bit;
+    }
+
+    if ((coord.row == 2U && coord.column == 0U) ||
+        (coord.row == 3U && coord.column == 0U) ||
+        (coord.row == 0U && coord.column == 5U)) {
+        ESP_LOGI(TAG,
+                 "ADV hotkey event=0x%02x pressed=%d coord=%u,%u arm=%d->%d pending=%d->%d mask=%016llx->%016llx",
+                 event,
+                 pressed ? 1 : 0,
+                 (unsigned)coord.row,
+                 (unsigned)coord.column,
+                 arm_before ? 1 : 0,
+                 s_adv_fn_armed ? 1 : 0,
+                 pending_before ? 1 : 0,
+                 s_adv_pending_press.active ? 1 : 0,
+                 (unsigned long long)mask_before,
+                 (unsigned long long)*pressed_mask);
     }
 }
 
