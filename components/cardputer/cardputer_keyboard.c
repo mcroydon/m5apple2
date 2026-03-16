@@ -353,7 +353,6 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
     cardputer_keycoord_t coord;
     bool pressed = false;
     uint64_t bit;
-    const uint64_t mask_before = *pressed_mask;
 
     if (!cardputer_keymap_decode_adv_event(event, &pressed, &coord)) {
         return;
@@ -365,19 +364,6 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
         cardputer_queue_matrix_press(*pressed_mask, coord);
     } else {
         *pressed_mask &= ~bit;
-    }
-
-    if ((coord.row == 2U && coord.column == 0U) ||
-        (coord.row == 3U && coord.column == 0U) ||
-        (coord.row == 0U && coord.column == 5U)) {
-        ESP_LOGI(TAG,
-                 "ADV raw event=0x%02x pressed=%d coord=%u,%u mask=%016llx->%016llx",
-                 event,
-                 pressed ? 1 : 0,
-                 (unsigned)coord.row,
-                 (unsigned)coord.column,
-                 (unsigned long long)mask_before,
-                 (unsigned long long)*pressed_mask);
     }
 }
 
@@ -397,23 +383,13 @@ static void cardputer_adv_keyboard_poll(void)
     }
     count &= 0x0FU;
     if (count != 0U) {
-        uint8_t events[16];
-        uint8_t event_count = 0U;
-
-        while (count-- != 0U && event_count < (uint8_t)sizeof(events)) {
+        while (count-- != 0U) {
             uint8_t event = 0;
 
             if (cardputer_adv_read_reg(TCA8418_REG_KEY_EVENT_A, &event) != ESP_OK) {
                 break;
             }
-            events[event_count++] = event;
-        }
-
-        /* The ADV keypad controller reports combo transitions newest-first.
-           Replay them oldest-first so modifier state is established before the
-           associated key press is translated. */
-        while (event_count-- != 0U) {
-            cardputer_adv_handle_event(events[event_count], &pressed_mask);
+            cardputer_adv_handle_event(event, &pressed_mask);
         }
     }
     (void)cardputer_adv_clear_interrupts();
