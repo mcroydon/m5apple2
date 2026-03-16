@@ -242,12 +242,6 @@ static bool cardputer_coord_equal(cardputer_keycoord_t a, cardputer_keycoord_t b
     return a.row == b.row && a.column == b.column;
 }
 
-static bool cardputer_adv_fn_active(uint64_t pressed_mask)
-{
-    return (pressed_mask &
-            cardputer_keymap_mask_for_coord((cardputer_keycoord_t){ .row = 2U, .column = 0U })) != 0U;
-}
-
 static uint64_t cardputer_adv_effective_mask(uint64_t pressed_mask, cardputer_keycoord_t coord)
 {
     if (!s_adv_fn_armed && cardputer_keymap_has_fn_command(coord)) {
@@ -263,6 +257,7 @@ static uint64_t cardputer_adv_effective_mask(uint64_t pressed_mask, cardputer_ke
 static void cardputer_adv_emit_press(uint64_t pressed_mask, cardputer_keycoord_t coord)
 {
     cardputer_queue_matrix_press(cardputer_adv_effective_mask(pressed_mask, coord), coord);
+    s_adv_fn_armed = false;
 }
 
 static void cardputer_adv_emit_pending(uint64_t pressed_mask)
@@ -432,15 +427,16 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
         if (cardputer_keymap_is_modifier(coord)) {
             if (coord.row == 2U && coord.column == 0U) {
                 s_adv_fn_armed = true;
-            }
-            if (coord.row == 2U && coord.column == 0U && s_adv_pending_press.active) {
-                cardputer_adv_emit_pending(*pressed_mask);
+                if (s_adv_pending_press.active) {
+                    cardputer_adv_emit_pending(*pressed_mask);
+                }
+            } else {
+                s_adv_fn_armed = false;
             }
             return;
         }
 
-        if (!cardputer_adv_fn_active(*pressed_mask) &&
-            cardputer_keymap_has_fn_command(coord)) {
+        if (!s_adv_fn_armed && cardputer_keymap_has_fn_command(coord)) {
             s_adv_pending_press.active = true;
             s_adv_pending_press.coord = coord;
             s_adv_pending_press.deadline =
@@ -455,9 +451,6 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
             cardputer_adv_emit_pending(*pressed_mask);
         }
         *pressed_mask &= ~bit;
-        if (coord.row == 2U && coord.column == 0U) {
-            s_adv_fn_armed = false;
-        }
     }
 }
 
