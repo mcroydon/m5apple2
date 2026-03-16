@@ -54,6 +54,7 @@ static uint64_t s_matrix_mask;
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 static TickType_t s_last_adv_poll;
 static uint64_t s_adv_pressed_mask;
+static bool s_adv_fn_armed;
 static struct {
     bool active;
     cardputer_keycoord_t coord;
@@ -247,13 +248,30 @@ static bool cardputer_adv_fn_active(uint64_t pressed_mask)
             cardputer_keymap_mask_for_coord((cardputer_keycoord_t){ .row = 2U, .column = 0U })) != 0U;
 }
 
+static uint64_t cardputer_adv_effective_mask(uint64_t pressed_mask, cardputer_keycoord_t coord)
+{
+    if (!s_adv_fn_armed && cardputer_keymap_has_fn_command(coord)) {
+        pressed_mask &= ~cardputer_keymap_mask_for_coord((cardputer_keycoord_t){
+            .row = 2U,
+            .column = 0U,
+        });
+    }
+
+    return pressed_mask;
+}
+
+static void cardputer_adv_emit_press(uint64_t pressed_mask, cardputer_keycoord_t coord)
+{
+    cardputer_queue_matrix_press(cardputer_adv_effective_mask(pressed_mask, coord), coord);
+}
+
 static void cardputer_adv_emit_pending(uint64_t pressed_mask)
 {
     if (!s_adv_pending_press.active) {
         return;
     }
 
-    cardputer_queue_matrix_press(pressed_mask, s_adv_pending_press.coord);
+    cardputer_adv_emit_press(pressed_mask, s_adv_pending_press.coord);
     s_adv_pending_press.active = false;
 }
 
@@ -383,6 +401,7 @@ static esp_err_t cardputer_adv_keyboard_init(void)
 
     s_last_adv_poll = xTaskGetTickCount();
     s_adv_pressed_mask = 0U;
+    s_adv_fn_armed = false;
     s_adv_pending_press.active = false;
     err = cardputer_adv_flush();
     if (err == ESP_OK) {
@@ -411,6 +430,9 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
 
         *pressed_mask |= bit;
         if (cardputer_keymap_is_modifier(coord)) {
+            if (coord.row == 2U && coord.column == 0U) {
+                s_adv_fn_armed = true;
+            }
             if (coord.row == 2U && coord.column == 0U && s_adv_pending_press.active) {
                 cardputer_adv_emit_pending(*pressed_mask);
             }
@@ -426,13 +448,16 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
             return;
         }
 
-        cardputer_queue_matrix_press(*pressed_mask, coord);
+        cardputer_adv_emit_press(*pressed_mask, coord);
     } else {
         if (s_adv_pending_press.active &&
             cardputer_coord_equal(s_adv_pending_press.coord, coord)) {
             cardputer_adv_emit_pending(*pressed_mask);
         }
         *pressed_mask &= ~bit;
+        if (coord.row == 2U && coord.column == 0U) {
+            s_adv_fn_armed = false;
+        }
     }
 }
 
