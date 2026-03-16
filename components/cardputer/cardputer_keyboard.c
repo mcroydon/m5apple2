@@ -27,7 +27,6 @@
 #define CARDPUTER_ADV_INT_GPIO 11
 #define CARDPUTER_ADV_SDA_GPIO 8
 #define CARDPUTER_ADV_SCL_GPIO 9
-#define CARDPUTER_ADV_FN_CHORD_WINDOW_MS 30
 
 #define TCA8418_REG_CFG 0x01
 #define TCA8418_REG_INT_STAT 0x02
@@ -53,13 +52,6 @@ static uint64_t s_matrix_mask;
 #endif
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 static TickType_t s_last_adv_poll;
-static uint64_t s_adv_pressed_mask;
-static bool s_adv_fn_armed;
-static struct {
-    bool active;
-    cardputer_keycoord_t coord;
-    TickType_t deadline;
-} s_adv_pending_press;
 #endif
 
 static uint8_t cardputer_translate_input(int ch)
@@ -237,52 +229,6 @@ static void cardputer_original_keyboard_poll(void)
 #endif
 
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
-static bool cardputer_coord_equal(cardputer_keycoord_t a, cardputer_keycoord_t b)
-{
-    return a.row == b.row && a.column == b.column;
-}
-
-static uint64_t cardputer_adv_effective_mask(uint64_t pressed_mask, cardputer_keycoord_t coord)
-{
-    if (!s_adv_fn_armed && cardputer_keymap_has_fn_command(coord)) {
-        pressed_mask &= ~cardputer_keymap_mask_for_coord((cardputer_keycoord_t){
-            .row = 2U,
-            .column = 0U,
-        });
-    }
-
-    return pressed_mask;
-}
-
-static void cardputer_adv_emit_press(uint64_t pressed_mask, cardputer_keycoord_t coord)
-{
-    cardputer_queue_matrix_press(cardputer_adv_effective_mask(pressed_mask, coord), coord);
-    s_adv_fn_armed = false;
-}
-
-static void cardputer_adv_emit_pending(uint64_t pressed_mask)
-{
-    if (!s_adv_pending_press.active) {
-        return;
-    }
-
-    cardputer_adv_emit_press(pressed_mask, s_adv_pending_press.coord);
-    s_adv_pending_press.active = false;
-}
-
-static void cardputer_adv_flush_expired_pending(TickType_t now)
-{
-    if (!s_adv_pending_press.active) {
-        return;
-    }
-
-    if ((int32_t)(now - s_adv_pending_press.deadline) < 0) {
-        return;
-    }
-
-    cardputer_adv_emit_pending(s_adv_pressed_mask);
-}
-
 static esp_err_t cardputer_adv_write_reg(uint8_t reg, uint8_t value)
 {
     const uint8_t payload[2] = { reg, value };
@@ -395,9 +341,6 @@ static esp_err_t cardputer_adv_keyboard_init(void)
     }
 
     s_last_adv_poll = xTaskGetTickCount();
-    s_adv_pressed_mask = 0U;
-    s_adv_fn_armed = false;
-    s_adv_pending_press.active = false;
     err = cardputer_adv_flush();
     if (err == ESP_OK) {
         ESP_LOGI(TAG, "ADV keyboard ready");
@@ -410,9 +353,6 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
     cardputer_keycoord_t coord;
     bool pressed = false;
     uint64_t bit;
-    const bool arm_before = s_adv_fn_armed;
-    const bool pending_before = s_adv_pending_press.active;
-    const uint64_t mask_before = *pressed_mask;
 
     if (!cardputer_keymap_decode_adv_event(event, &pressed, &coord)) {
         return;
@@ -420,66 +360,18 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
 
     bit = cardputer_keymap_mask_for_coord(coord);
     if (pressed) {
-        if (s_adv_pending_press.active &&
-            !cardputer_coord_equal(s_adv_pending_press.coord, coord) &&
-            !(coord.row == 2U && coord.column == 0U)) {
-            cardputer_adv_emit_pending(*pressed_mask);
-        }
-
         *pressed_mask |= bit;
-        if (cardputer_keymap_is_modifier(coord)) {
-            if (coord.row == 2U && coord.column == 0U) {
-                s_adv_fn_armed = true;
-                if (s_adv_pending_press.active) {
-                    cardputer_adv_emit_pending(*pressed_mask);
-                }
-            } else {
-                s_adv_fn_armed = false;
-            }
-            return;
-        }
-
-        if (!s_adv_fn_armed && cardputer_keymap_has_fn_command(coord)) {
-            s_adv_pending_press.active = true;
-            s_adv_pending_press.coord = coord;
-            s_adv_pending_press.deadline =
-                xTaskGetTickCount() + pdMS_TO_TICKS(CARDPUTER_ADV_FN_CHORD_WINDOW_MS);
-            return;
-        }
-
-        cardputer_adv_emit_press(*pressed_mask, coord);
+        cardputer_queue_matrix_press(*pressed_mask, coord);
     } else {
-        if (s_adv_pending_press.active &&
-            cardputer_coord_equal(s_adv_pending_press.coord, coord)) {
-            cardputer_adv_emit_pending(*pressed_mask);
-        }
         *pressed_mask &= ~bit;
-    }
-
-    if ((coord.row == 2U && coord.column == 0U) ||
-        (coord.row == 3U && coord.column == 0U) ||
-        (coord.row == 0U && coord.column == 5U)) {
-        ESP_LOGI(TAG,
-                 "ADV hotkey event=0x%02x pressed=%d coord=%u,%u arm=%d->%d pending=%d->%d mask=%016llx->%016llx",
-                 event,
-                 pressed ? 1 : 0,
-                 (unsigned)coord.row,
-                 (unsigned)coord.column,
-                 arm_before ? 1 : 0,
-                 s_adv_fn_armed ? 1 : 0,
-                 pending_before ? 1 : 0,
-                 s_adv_pending_press.active ? 1 : 0,
-                 (unsigned long long)mask_before,
-                 (unsigned long long)*pressed_mask);
     }
 }
 
 static void cardputer_adv_keyboard_poll(void)
 {
+    static uint64_t pressed_mask;
     const TickType_t now = xTaskGetTickCount();
     uint8_t count = 0;
-
-    cardputer_adv_flush_expired_pending(now);
 
     if (gpio_get_level((gpio_num_t)CARDPUTER_ADV_INT_GPIO) != 0 &&
         (now - s_last_adv_poll) < pdMS_TO_TICKS(CARDPUTER_MATRIX_SCAN_PERIOD_MS)) {
@@ -491,13 +383,23 @@ static void cardputer_adv_keyboard_poll(void)
     }
     count &= 0x0FU;
     if (count != 0U) {
-        while (count-- != 0U) {
+        uint8_t events[16];
+        uint8_t event_count = 0U;
+
+        while (count-- != 0U && event_count < (uint8_t)sizeof(events)) {
             uint8_t event = 0;
 
             if (cardputer_adv_read_reg(TCA8418_REG_KEY_EVENT_A, &event) != ESP_OK) {
                 break;
             }
-            cardputer_adv_handle_event(event, &s_adv_pressed_mask);
+            events[event_count++] = event;
+        }
+
+        /* The ADV keypad controller reports combo transitions newest-first.
+           Replay them oldest-first so modifier state is established before the
+           associated key press is translated. */
+        while (event_count-- != 0U) {
+            cardputer_adv_handle_event(events[event_count], &pressed_mask);
         }
     }
     (void)cardputer_adv_clear_interrupts();
