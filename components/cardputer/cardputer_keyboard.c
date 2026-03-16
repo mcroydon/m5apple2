@@ -353,6 +353,7 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
     cardputer_keycoord_t coord;
     bool pressed = false;
     uint64_t bit;
+    const uint64_t mask_before = *pressed_mask;
 
     if (!cardputer_keymap_decode_adv_event(event, &pressed, &coord)) {
         return;
@@ -364,6 +365,19 @@ static void cardputer_adv_handle_event(uint8_t event, uint64_t *pressed_mask)
         cardputer_queue_matrix_press(*pressed_mask, coord);
     } else {
         *pressed_mask &= ~bit;
+    }
+
+    if ((coord.row == 2U && coord.column == 0U) ||
+        (coord.row == 3U && coord.column == 0U) ||
+        (coord.row == 0U && coord.column == 5U)) {
+        ESP_LOGI(TAG,
+                 "ADV raw event=0x%02x pressed=%d coord=%u,%u mask=%016llx->%016llx",
+                 event,
+                 pressed ? 1 : 0,
+                 (unsigned)coord.row,
+                 (unsigned)coord.column,
+                 (unsigned long long)mask_before,
+                 (unsigned long long)*pressed_mask);
     }
 }
 
