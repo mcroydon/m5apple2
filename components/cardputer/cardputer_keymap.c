@@ -234,8 +234,8 @@ bool cardputer_keymap_decode_adv_event(uint8_t event,
         return false;
     }
 
-    /* TCA8418 events use a clear high bit for press and a set high bit for release. */
-    *pressed = (event & 0x80U) == 0U;
+    /* TCA8418 KEY_EVENT bit 7 is set for press and clear for release. */
+    *pressed = (event & 0x80U) != 0U;
     return cardputer_keymap_decode_adv(row, col, coord);
 }
 

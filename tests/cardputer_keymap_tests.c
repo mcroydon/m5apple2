@@ -54,16 +54,16 @@ static void test_adv_event_decode(void)
     bool pressed = false;
 
     assert(cardputer_keymap_decode_adv_event(0x01U, &pressed, &coord));
-    assert(pressed);
-    assert(coord.row == 0U);
-    assert(coord.column == 0U);
-
-    assert(cardputer_keymap_decode_adv_event(0x81U, &pressed, &coord));
     assert(!pressed);
     assert(coord.row == 0U);
     assert(coord.column == 0U);
 
-    assert(cardputer_keymap_decode_adv_event(0x44U, &pressed, &coord));
+    assert(cardputer_keymap_decode_adv_event(0x81U, &pressed, &coord));
+    assert(pressed);
+    assert(coord.row == 0U);
+    assert(coord.column == 0U);
+
+    assert(cardputer_keymap_decode_adv_event(0xC4U, &pressed, &coord));
     assert(pressed);
     assert(coord.row == 3U);
     assert(coord.column == 13U);
