@@ -944,6 +944,98 @@ static void test_decimal_sbc_flags(void)
     }
 }
 
+static void test_disk2_write_mode(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_NIB_IMAGE_SIZE];
+
+    memset(image, 0x80, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_nib_drive(&disk2, 0, image, sizeof(image)));
+
+    /* Motor on. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.motor_on);
+    assert(!disk2.q6);
+    assert(!disk2.q7);
+
+    /* Enter write mode: Q6=1 (reg D), Q7=1 (reg F). */
+    (void)apple2_disk2_access(&disk2, 0xDU); /* Q6 = true */
+    (void)apple2_disk2_access(&disk2, 0xFU); /* Q7 = true */
+    assert(disk2.q6);
+    assert(disk2.q7);
+    assert(disk2.write_mode);
+
+    /* Exit write mode: Q7=0 (reg E). */
+    (void)apple2_disk2_access(&disk2, 0xEU); /* Q7 = false */
+    assert(!disk2.write_mode);
+}
+
+/* Test helper: capture sectors written by flush. */
+typedef struct {
+    uint8_t sectors[16][256];
+    uint8_t track[16];
+    uint8_t file_sector[16];
+    unsigned count;
+} test_write_capture_t;
+
+static bool test_write_sector(void *context, unsigned drive_index, uint8_t track,
+                               uint8_t file_sector, const uint8_t *sector_data)
+{
+    test_write_capture_t *cap = context;
+    (void)drive_index;
+    if (cap->count < 16U) {
+        cap->track[cap->count] = track;
+        cap->file_sector[cap->count] = file_sector;
+        memcpy(cap->sectors[cap->count], sector_data, 256U);
+        cap->count++;
+    }
+    return true;
+}
+
+static void test_disk2_write_flush_roundtrip(void)
+{
+    /* Create a sector image with known data. */
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+    for (size_t i = 0; i < sizeof(image); ++i) {
+        image[i] = (uint8_t)(i & 0xFFU);
+    }
+
+    apple2_disk2_t disk2;
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_drive_with_order(&disk2, 0, image, sizeof(image),
+                                               APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL));
+
+    /* Build track 0 cache by turning motor on. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.track_cache_valid);
+
+    /* Attach write callback. */
+    test_write_capture_t capture;
+    memset(&capture, 0, sizeof(capture));
+    apple2_disk2_attach_drive_writer(&disk2, 0, test_write_sector, &capture);
+
+    /* Mark dirty and flush. */
+    disk2.track_cache_dirty = true;
+    assert(apple2_disk2_flush(&disk2));
+    assert(!disk2.track_cache_dirty);
+
+    /* Should have decoded all 16 sectors from track 0. */
+    assert(capture.count == 16U);
+
+    /* Verify the first sector's data matches the original image.
+       File sector 0 corresponds to the first 256 bytes of the image (track 0, sector 0). */
+    bool found_sector0 = false;
+    for (unsigned i = 0; i < capture.count; ++i) {
+        if (capture.track[i] == 0U && capture.file_sector[i] == 0U) {
+            assert(memcmp(capture.sectors[i], &image[0], 256U) == 0);
+            found_sector0 = true;
+            break;
+        }
+    }
+    assert(found_sector0);
+}
+
 static void test_disk2_tick_multi_advance(void)
 {
     apple2_disk2_t disk2;
@@ -998,6 +1090,8 @@ int main(void)
     test_game_io_stubs();
     test_decimal_sbc_flags();
     test_disk2_tick_multi_advance();
+    test_disk2_write_mode();
+    test_disk2_write_flush_roundtrip();
     puts("apple2 core tests passed");
     return 0;
 }

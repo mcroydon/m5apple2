@@ -542,6 +542,9 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
     }
 
     if (address >= 0xC0E0U && address <= 0xC0EFU) {
+        if ((address & 0x0FU) == 0x0DU && machine->disk2.q7) {
+            machine->disk2.data_latch = value;
+        }
         const uint8_t ignored = apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU));
 
         apple2_disk_io_trace(machine, address, true, ignored);

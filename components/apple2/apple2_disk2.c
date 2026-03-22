@@ -240,6 +240,8 @@ static void disk2_clear_drive_source(apple2_disk2_t *disk2, unsigned drive_index
     disk2->read_sector_context[drive_index] = NULL;
     disk2->read_track[drive_index] = NULL;
     disk2->read_track_context[drive_index] = NULL;
+    disk2->write_sector[drive_index] = NULL;
+    disk2->write_sector_context[drive_index] = NULL;
 }
 
 static bool disk2_set_track_cache(apple2_disk2_t *disk2,
@@ -655,6 +657,8 @@ void apple2_disk2_reset(apple2_disk2_t *disk2)
     disk2->active_drive = 0;
     disk2->q6 = false;
     disk2->q7 = false;
+    disk2->write_mode = false;
+    disk2->track_cache_dirty = false;
     disk2->data_latch = 0;
     disk2->track_cache_valid = false;
     memset(disk2->phase_mask, 0, sizeof(disk2->phase_mask));
@@ -753,6 +757,18 @@ bool apple2_disk2_attach_drive_track_reader(apple2_disk2_t *disk2,
     return true;
 }
 
+void apple2_disk2_attach_drive_writer(apple2_disk2_t *disk2,
+                                       unsigned drive_index,
+                                       apple2_disk2_write_sector_fn write_sector,
+                                       void *context)
+{
+    if (drive_index >= 2U) {
+        return;
+    }
+    disk2->write_sector[drive_index] = write_sector;
+    disk2->write_sector_context[drive_index] = context;
+}
+
 void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
 {
     if (drive_index >= 2U) {
@@ -769,6 +785,122 @@ void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index)
     if (disk2->active_drive == drive_index) {
         disk2->track_cache_valid = false;
     }
+}
+
+static uint8_t s_disk2_gcr62_inverse[256];
+static bool s_disk2_gcr62_inverse_ready = false;
+
+static void disk2_ensure_gcr62_inverse(void)
+{
+    if (s_disk2_gcr62_inverse_ready) {
+        return;
+    }
+    memset(s_disk2_gcr62_inverse, 0xFF, sizeof(s_disk2_gcr62_inverse));
+    for (uint8_t i = 0; i < 64U; ++i) {
+        s_disk2_gcr62_inverse[s_disk2_gcr62[i]] = i;
+    }
+    s_disk2_gcr62_inverse_ready = true;
+}
+
+static inline uint8_t disk2_decode44(uint8_t high, uint8_t low)
+{
+    return (uint8_t)(((high & 0x55U) << 1) | (low & 0x55U));
+}
+
+bool apple2_disk2_flush(apple2_disk2_t *disk2)
+{
+    if (!disk2->track_cache_dirty || !disk2->track_cache_valid) {
+        return true; /* Nothing to flush. */
+    }
+
+    const uint8_t drive = disk2->track_cache_drive;
+    if (drive >= 2U || disk2->write_sector[drive] == NULL) {
+        return false;
+    }
+
+    const apple2_disk2_image_order_t order = disk2->image_order[drive];
+    const uint8_t *track_order =
+        (order == APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL)
+            ? s_dos33_track_order : s_prodos_track_order;
+
+    disk2_ensure_gcr62_inverse();
+
+    const uint16_t len = disk2->track_cache_length;
+    const uint8_t *cache = disk2->track_cache;
+    bool ok = true;
+
+    for (uint16_t i = 0; i + 3U <= len; ++i) {
+        /* Find address field prologue: D5 AA 96 */
+        if (cache[i] != 0xD5U || cache[i + 1U] != 0xAAU || cache[i + 2U] != 0x96U) {
+            continue;
+        }
+
+        const uint16_t hdr = (uint16_t)(i + 3U);
+        if (hdr + 8U > len) break;
+
+        /* Volume is at hdr+0..+1, track at hdr+2..+3, sector at hdr+4..+5 */
+        const uint8_t track = disk2_decode44(cache[hdr + 2U], cache[hdr + 3U]);
+        const uint8_t phys_sector = disk2_decode44(cache[hdr + 4U], cache[hdr + 5U]);
+
+        /* Find data field prologue: D5 AA AD (within 60 bytes of header end) */
+        uint16_t j = (uint16_t)(hdr + 8U);
+        bool found_data = false;
+        while (j + 3U <= len && j < (uint16_t)(hdr + 60U)) {
+            if (cache[j] == 0xD5U && cache[j + 1U] == 0xAAU && cache[j + 2U] == 0xADU) {
+                found_data = true;
+                break;
+            }
+            j++;
+        }
+        if (!found_data) continue;
+
+        const uint16_t data_start = (uint16_t)(j + 3U);
+        if (data_start + 342U > len) continue;
+
+        /* Reverse 6-and-2 GCR decode: 86 aux bytes + 256 upper bytes = 342 */
+        uint8_t decoded[342];
+        uint8_t prev = 0;
+        for (uint16_t k = 0; k < 342U; ++k) {
+            const uint8_t raw = s_disk2_gcr62_inverse[cache[data_start + k]];
+            decoded[k] = (uint8_t)(prev ^ raw);
+            prev = decoded[k];
+        }
+
+        /* Reconstruct 256-byte sector from decoded data.
+           decoded[0..85] = aux (6-bit values with swapped low-2-bit pairs)
+           decoded[86..341] = upper (6-bit values, the high 6 bits of each byte) */
+        uint8_t sector_data[256];
+        for (uint16_t si = 0; si < 256U; ++si) {
+            sector_data[si] = (uint8_t)(decoded[86U + si] << 2);
+        }
+        for (uint16_t si = 0; si < 86U; ++si) {
+            const uint8_t aux = decoded[si];
+            /* Reverse the bit swap from encoding: encoded pairs are (bit1,bit0) swapped */
+            const uint8_t low2_0 = (uint8_t)(((aux & 0x02U) >> 1) | ((aux & 0x01U) << 1));
+            sector_data[si] |= low2_0;
+            if (si + 86U < 256U) {
+                const uint8_t low2_1 = (uint8_t)(((aux & 0x08U) >> 3) | ((aux & 0x04U) >> 1));
+                sector_data[si + 86U] |= low2_1;
+            }
+            if (si + 172U < 256U) {
+                const uint8_t low2_2 = (uint8_t)(((aux & 0x20U) >> 5) | ((aux & 0x10U) >> 3));
+                sector_data[si + 172U] |= low2_2;
+            }
+        }
+
+        const uint8_t file_sector = disk2_find_file_sector_for_physical(track_order, phys_sector);
+        if (!disk2->write_sector[drive](disk2->write_sector_context[drive],
+                                         drive, track, file_sector, sector_data)) {
+            ok = false;
+        }
+
+        i = (uint16_t)(data_start + 342U);
+    }
+
+    if (ok) {
+        disk2->track_cache_dirty = false;
+    }
+    return ok;
 }
 
 void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
@@ -803,13 +935,19 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
 
     while (*stream_accum >= cpu_hz && advances < 8U) {
         *stream_accum -= cpu_hz;
+        if (disk2->write_mode) {
+            disk2->track_cache[*nibble_pos] = disk2->data_latch;
+            disk2->track_cache_dirty = true;
+        }
         (*nibble_pos)++;
         if (*nibble_pos >= track_length) {
             *nibble_pos = 0U;
         }
         advances++;
     }
-    disk2_latch_prepared_byte(disk2);
+    if (!disk2->write_mode) {
+        disk2_latch_prepared_byte(disk2);
+    }
 }
 
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index)
@@ -861,6 +999,7 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
         break;
     case 0xC:
         disk2->q6 = false;
+        disk2->write_mode = disk2->q6 && disk2->q7;
         if (!disk2->q7) {
             if (!disk2->data_ready && !disk2->track_cache_valid) {
                 (void)disk2_latch_current_byte(disk2);
@@ -876,6 +1015,7 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
         break;
     case 0xD:
         disk2->q6 = true;
+        disk2->write_mode = disk2->q6 && disk2->q7;
         if (!disk2->q7) {
             disk2->data_ready = false;
             disk2->data_latch = 0x00U;
@@ -883,9 +1023,11 @@ uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg)
         break;
     case 0xE:
         disk2->q7 = false;
+        disk2->write_mode = disk2->q6 && disk2->q7;
         break;
     case 0xF:
         disk2->q7 = true;
+        disk2->write_mode = disk2->q6 && disk2->q7;
         break;
     default:
         break;
