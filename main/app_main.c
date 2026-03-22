@@ -20,6 +20,15 @@
 #include "cardputer/cardputer_display.h"
 #include "cardputer/cardputer_keyboard.h"
 
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+#include "cardputer/cardputer_audio.h"
+
+static void app_speaker_toggle(void *context, uint64_t total_cycles)
+{
+    cardputer_audio_toggle((cardputer_audio_t *)context, total_cycles);
+}
+#endif
+
 #ifndef CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS
 #define CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS 2000
 #endif
@@ -2728,6 +2737,14 @@ void app_main(void)
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
              s_display.native_width, s_display.native_height);
 
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+    cardputer_audio_t *audio = cardputer_audio_init();
+    if (audio != NULL) {
+        apple2_machine_set_speaker_callback(&s_machine, app_speaker_toggle, audio);
+        ESP_LOGI(TAG, "Audio output enabled");
+    }
+#endif
+
     rom_loaded = app_load_system_rom();
     slot6_loaded = app_load_slot6_rom();
     drive0_loaded = app_load_drive0_image();
@@ -2878,6 +2895,12 @@ void app_main(void)
                     step_slices++;
                 }
                 s_perf.cpu_step_us += (uint64_t)(esp_timer_get_time() - step_start_us);
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+                if (audio != NULL) {
+                    cardputer_audio_flush(audio, s_machine.total_cycles,
+                                          apple2_config.cpu_hz * app_speed_multiplier());
+                }
+#endif
             }
         }
         last_cpu_tick_us = now_us;
