@@ -848,6 +848,102 @@ static void test_game_io_stubs(void)
     }
 }
 
+static void test_decimal_sbc_flags(void)
+{
+    apple2_machine_t machine;
+
+    /* Test 1: $50 - $30 = $20 in BCD.
+       Binary: $50 - $30 - (1 - carry=1) = $20.
+       N flag from binary result: 0 (bit 7 of $20 = 0).
+       Z flag from binary result: 0 ($20 != 0). */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x50, /* LDA #$50 */
+            0xE9, 0x30, /* SBC #$30 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x20U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) == 0U);  /* Binary $20: not negative. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) == 0U);       /* Binary $20: not zero. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) != 0U);      /* No borrow. */
+    }
+
+    /* Test 2: $32 - $32 = $00 in BCD.
+       Binary: $32 - $32 = $00.
+       Z flag from binary result: 1 ($00 == 0).
+       N flag from binary result: 0. */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x32, /* LDA #$32 */
+            0xE9, 0x32, /* SBC #$32 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x00U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) != 0U);       /* Binary $00: zero. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) == 0U);    /* Binary $00: not negative. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) != 0U);       /* No borrow. */
+    }
+
+    /* Test 3: $10 - $20 = $90 in BCD (borrow).
+       Binary: $10 - $20 = $F0 (wraps).
+       N flag from binary result: 1 (bit 7 of $F0 = 1).
+       Z flag from binary result: 0 ($F0 != 0).
+       Carry: 0 (borrow occurred). */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x10, /* LDA #$10 */
+            0xE9, 0x20, /* SBC #$20 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x90U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) != 0U);  /* Binary $F0: negative. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) == 0U);       /* Binary $F0: not zero. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) == 0U);      /* Borrow occurred. */
+    }
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -873,6 +969,7 @@ int main(void)
     test_disk2_redundant_switches_do_not_reset_state();
     test_disk2_sector_tracks_keep_dos_interleave();
     test_game_io_stubs();
+    test_decimal_sbc_flags();
     puts("apple2 core tests passed");
     return 0;
 }
