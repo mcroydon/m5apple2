@@ -736,6 +736,59 @@ static void test_disk2_redundant_switches_do_not_reset_state(void)
     assert(disk2.data_latch == 0xAAU);
 }
 
+static void test_keyboard_latch_aliasing(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    apple2_machine_set_key(&machine, 'B');
+    assert(machine.key_latch == 0xC2U);
+
+    /* All addresses $C000-$C00F should return the key latch. */
+    for (uint16_t addr = 0xC000U; addr <= 0xC00FU; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_set_key(&machine, 'B');
+        apple2_machine_step_instruction(&machine);
+        assert(apple2_machine_cpu_state(&machine).a == 0xC2U);
+    }
+}
+
+static void test_keyboard_strobe_aliasing(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    /* Reading any address $C010-$C01F should clear the strobe. */
+    for (uint16_t addr = 0xC010U; addr <= 0xC01FU; ++addr) {
+        apple2_machine_set_key(&machine, 'X');
+        assert((machine.key_latch & 0x80U) != 0U);
+
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_set_key(&machine, 'X');
+        apple2_machine_step_instruction(&machine);
+        assert((machine.key_latch & 0x80U) == 0U);
+    }
+
+    /* Writing to $C010-$C01F should also clear the strobe. */
+    apple2_machine_set_key(&machine, 'Z');
+    assert((machine.key_latch & 0x80U) != 0U);
+    apple2_machine_poke(&machine, 0xC015, 0x00);
+    assert((machine.key_latch & 0x80U) == 0U);
+}
+
 static void test_disk2_sector_tracks_keep_dos_interleave(void)
 {
     static const uint8_t s_expected_track1_order[16] = {
@@ -768,6 +821,8 @@ int main(void)
     test_decimal_adc();
     test_undocumented_nops();
     test_soft_switches();
+    test_keyboard_latch_aliasing();
+    test_keyboard_strobe_aliasing();
     test_video_addresses();
     test_text_render();
     test_text_code_mapping();

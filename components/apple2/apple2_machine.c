@@ -356,12 +356,15 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
         return apple2_bus_value(machine, machine->memory[address]);
     }
 
-    switch (address) {
-    case 0xC000:
+    if (address >= 0xC000U && address <= 0xC00FU) {
         return apple2_bus_value(machine, machine->key_latch);
-    case 0xC010:
+    }
+    if (address >= 0xC010U && address <= 0xC01FU) {
         machine->key_latch &= 0x7FU;
         return apple2_bus_value(machine, machine->key_latch);
+    }
+
+    switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
         return apple2_bus_value(machine, machine->floating_bus);
@@ -452,10 +455,15 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
         return;
     }
 
-    switch (address) {
-    case 0xC010:
+    if (address >= 0xC000U && address <= 0xC00FU) {
+        return;
+    }
+    if (address >= 0xC010U && address <= 0xC01FU) {
         machine->key_latch &= 0x7FU;
         return;
+    }
+
+    switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
         return;
