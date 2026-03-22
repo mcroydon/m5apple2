@@ -10,6 +10,10 @@
 
 #define APPLE2_VIDEO_WIDTH 280
 #define APPLE2_VIDEO_HEIGHT 192
+#define APPLE2_LANGCARD_BANK_SIZE 0x1000U
+#define APPLE2_LANGCARD_UPPER_SIZE 0x2000U
+#define APPLE2_LANGCARD_RAM_SIZE 0x4000U
+#define APPLE2_LANGCARD_ROM_SIZE 0x3000U
 
 typedef struct {
     uint32_t cpu_hz;
@@ -30,10 +34,13 @@ typedef struct {
     cpu6502_t cpu;
     uint64_t total_cycles;
     uint8_t memory[65536];
+    uint8_t *langcard_ram;
+    const uint8_t *langcard_rom;
     uint8_t key_latch;
     uint8_t floating_bus;
     uint8_t annunciator_state;
     uint8_t c8_slot;
+    uint8_t langcard_write_count;
     uint32_t speaker_toggles;
     apple2_video_state_t video;
     apple2_disk2_t disk2;
@@ -41,6 +48,9 @@ typedef struct {
     size_t system_rom_size;
     uint32_t flash_half_period_cycles;
     uint32_t flash_cycle_accum;
+    bool langcard_bank1_active;
+    bool langcard_read_enabled;
+    bool langcard_write_enabled;
     bool motherboard_rom_loaded;
     bool system_rom_loaded;
     bool slot6_rom_loaded;

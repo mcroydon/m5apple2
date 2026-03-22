@@ -136,6 +136,16 @@ config M5APPLE2_SD_HOST_ID
     default 3 if M5APPLE2_CARDPUTER_VARIANT_ADV
     default 2
 
+config M5APPLE2_SD_MAX_FREQ_KHZ
+    int "SD SPI max clock (kHz)"
+    depends on M5APPLE2_SD_ENABLE
+    range 1000 20000
+    default 4000 if M5APPLE2_CARDPUTER_VARIANT_ADV
+    default 20000
+    help
+        Caps the SD SPI clock used after card initialization. Lower values can
+        improve reliability on the Cardputer ADV during sustained disk I/O.
+
 config M5APPLE2_SD_PIN_MOSI
     int "SD MOSI pin"
     depends on M5APPLE2_SD_ENABLE

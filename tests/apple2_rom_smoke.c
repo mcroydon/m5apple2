@@ -1,6 +1,7 @@
 #include "apple2/apple2_machine.h"
 #include "apple2/apple2_video.h"
 
+#include <inttypes.h>
 #include <stdbool.h>
 #include <limits.h>
 #include <stdint.h>
@@ -20,6 +21,20 @@ typedef enum {
 #define DSK_PROBE_FALLBACK_INSTRUCTIONS 3000000U
 #define DOS_PROMPT_INSTRUCTIONS 17000000U
 #define CUSTOM_DISK_INSTRUCTIONS 40000000U
+#define DISK_READ_TRACE_ENTRIES 64U
+#define PC_TRACE_ENTRIES 128U
+#define APP_PC_TRACE_ENTRIES 64U
+#define APP_BOOT_TRACE_LIMIT 512U
+
+typedef struct {
+    const uint8_t *disk;
+    size_t disk_size;
+    uint32_t total_reads;
+    struct {
+        uint8_t track;
+        uint8_t file_sector;
+    } recent_reads[DISK_READ_TRACE_ENTRIES];
+} disk_read_trace_t;
 
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
@@ -404,6 +419,86 @@ static bool disk_screen_has_basic_prompt(const apple2_machine_t *machine)
     return false;
 }
 
+static bool disk_trace_read_sector(void *context,
+                                   unsigned drive_index,
+                                   uint8_t track,
+                                   uint8_t file_sector,
+                                   uint8_t *sector_data)
+{
+    disk_read_trace_t *trace = context;
+    const size_t offset = (((size_t)track * 16U) + file_sector) * 256U;
+    const uint32_t slot = trace != NULL ? (trace->total_reads % DISK_READ_TRACE_ENTRIES) : 0U;
+
+    (void)drive_index;
+    if (trace == NULL || sector_data == NULL || trace->disk == NULL || trace->disk_size != APPLE2_DISK2_IMAGE_SIZE) {
+        return false;
+    }
+    if (track >= 35U || file_sector >= 16U || offset > trace->disk_size || 256U > (trace->disk_size - offset)) {
+        return false;
+    }
+
+    memcpy(sector_data, &trace->disk[offset], 256U);
+    trace->recent_reads[slot].track = track;
+    trace->recent_reads[slot].file_sector = file_sector;
+    trace->total_reads++;
+    return true;
+}
+
+static void disk_dump_recent_sector_reads(const disk_read_trace_t *trace)
+{
+    uint32_t count;
+    uint32_t start_slot;
+
+    if (trace == NULL || trace->total_reads == 0U) {
+        return;
+    }
+
+    count = trace->total_reads < DISK_READ_TRACE_ENTRIES ? trace->total_reads : DISK_READ_TRACE_ENTRIES;
+    start_slot = trace->total_reads < DISK_READ_TRACE_ENTRIES
+                     ? 0U
+                     : (trace->total_reads % DISK_READ_TRACE_ENTRIES);
+
+    fprintf(stderr, "recent sector reads (%" PRIu32 " total):\n", trace->total_reads);
+    for (uint32_t i = 0; i < count; ++i) {
+        const uint32_t slot = (start_slot + i) % DISK_READ_TRACE_ENTRIES;
+        const uint32_t sequence = trace->total_reads - count + i;
+
+        fprintf(stderr,
+                "  %03" PRIu32 ": T%u S%u\n",
+                sequence,
+                trace->recent_reads[slot].track,
+                trace->recent_reads[slot].file_sector);
+    }
+}
+
+static bool disk_type_is_sector_image(disk_image_type_t type)
+{
+    switch (type) {
+    case DISK_IMAGE_DSK_DOS_ORDER:
+    case DISK_IMAGE_DSK_PRODOS_ORDER:
+    case DISK_IMAGE_DO_DOS_ORDER:
+    case DISK_IMAGE_PO_PRODOS_ORDER:
+        return true;
+    case DISK_IMAGE_NONE:
+    default:
+        return false;
+    }
+}
+
+static apple2_disk2_image_order_t disk_image_order_for_type(disk_image_type_t type)
+{
+    switch (type) {
+    case DISK_IMAGE_PO_PRODOS_ORDER:
+    case DISK_IMAGE_DSK_PRODOS_ORDER:
+        return APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL;
+    case DISK_IMAGE_DSK_DOS_ORDER:
+    case DISK_IMAGE_DO_DOS_ORDER:
+    case DISK_IMAGE_NONE:
+    default:
+        return APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+    }
+}
+
 static void disk_dump_screen(const apple2_machine_t *machine)
 {
     char row_text[41];
@@ -420,6 +515,57 @@ static void disk_dump_screen(const apple2_machine_t *machine)
         row_text[40] = '\0';
         fprintf(stderr, "row%02u: %s\n", row, row_text);
     }
+}
+
+static void disk_dump_recent_pcs(const uint16_t *pcs, size_t count, size_t next_index)
+{
+    if (count == 0U) {
+        return;
+    }
+
+    fprintf(stderr, "recent pcs (%zu total):\n", count);
+    for (size_t i = 0; i < count; ++i) {
+        const size_t index = (next_index + i) % count;
+
+        fprintf(stderr, "  %03zu: %04x\n", i, pcs[index]);
+    }
+}
+
+static void disk_dump_bytes(const apple2_machine_t *machine, uint16_t base, uint16_t count)
+{
+    fprintf(stderr, "bytes %04x:", base);
+    for (uint16_t i = 0; i < count; ++i) {
+        fprintf(stderr, " %02x", machine->memory[(uint16_t)(base + i)]);
+    }
+    fputc('\n', stderr);
+}
+
+static void disk_trace_app_boot(const apple2_machine_t *machine, uint32_t step_index)
+{
+    static uint32_t emitted = 0U;
+    const apple2_cpu_state_t cpu = apple2_machine_cpu_state(machine);
+
+    if (emitted >= APP_BOOT_TRACE_LIMIT) {
+        return;
+    }
+    if (!((cpu.pc >= 0x07FDU && cpu.pc < 0x0850U) ||
+          (cpu.pc >= 0xB800U && cpu.pc < 0xBE00U))) {
+        return;
+    }
+
+    fprintf(stderr,
+            "appboot %03" PRIu32 " pc=%04x op=%02x %02x %02x a=%02x x=%02x y=%02x sp=%02x p=%02x\n",
+            step_index,
+            cpu.pc,
+            machine->memory[cpu.pc],
+            machine->memory[(uint16_t)(cpu.pc + 1U)],
+            machine->memory[(uint16_t)(cpu.pc + 2U)],
+            cpu.a,
+            cpu.x,
+            cpu.y,
+            cpu.sp,
+            cpu.p);
+    emitted++;
 }
 
 static const char *disk_extension(const char *path)
@@ -456,6 +602,11 @@ int main(void)
     const char *boot_command = getenv("APPLE2_TEST_BOOT_COMMAND");
     const char *dump_screen = getenv("APPLE2_TEST_DUMP_SCREEN");
     const char *log_dsk_order = getenv("APPLE2_TEST_LOG_DSK_ORDER");
+    const char *trace_sector_reads = getenv("APPLE2_TEST_TRACE_SECTOR_READS");
+    const char *expect_not_basic_prompt = getenv("APPLE2_TEST_EXPECT_NOT_BASIC_PROMPT");
+    const char *trace_pcs = getenv("APPLE2_TEST_TRACE_PCS");
+    const char *trace_app_boot = getenv("APPLE2_TEST_TRACE_APP_BOOT");
+    const char *force_direct_disk = getenv("APPLE2_TEST_FORCE_DIRECT_DISK");
     const char *disk_path = NULL;
     FILE *disk_file = NULL;
     uint8_t rom[0x8000];
@@ -476,8 +627,23 @@ int main(void)
     bool expected_text_ready = false;
     bool boot_command_started = false;
     bool boot_command_finished = false;
+    bool entered_loaded_binary = false;
+    uint16_t last_loaded_binary_pc = 0U;
     size_t boot_command_pos = 0;
     uint32_t custom_instruction_limit = CUSTOM_DISK_INSTRUCTIONS;
+    const bool trace_sector_reads_enabled = trace_sector_reads != NULL && trace_sector_reads[0] != '\0';
+    const bool require_not_basic_prompt = expect_not_basic_prompt != NULL && expect_not_basic_prompt[0] != '\0';
+    const bool trace_pcs_enabled = trace_pcs != NULL && trace_pcs[0] != '\0';
+    const bool trace_app_boot_enabled = trace_app_boot != NULL && trace_app_boot[0] != '\0';
+    const bool force_direct_disk_enabled = force_direct_disk != NULL && force_direct_disk[0] != '\0';
+    disk_read_trace_t disk_read_trace = { 0 };
+    bool disk_read_trace_active = false;
+    uint16_t recent_pcs[PC_TRACE_ENTRIES] = { 0 };
+    size_t recent_pc_count = 0U;
+    size_t recent_pc_next = 0U;
+    uint16_t recent_app_pcs[APP_PC_TRACE_ENTRIES] = { 0 };
+    size_t recent_app_pc_count = 0U;
+    size_t recent_app_pc_next = 0U;
 
     if (expected_text != NULL && expected_text[0] == '\0') {
         expected_text = NULL;
@@ -564,14 +730,56 @@ int main(void)
 
         switch (disk_type) {
         case DISK_IMAGE_DO_DOS_ORDER:
-            loaded = apple2_machine_load_drive0_do(&machine, disk, disk_size);
+            if (!force_direct_disk_enabled &&
+                (trace_sector_reads_enabled || require_not_basic_prompt) &&
+                disk_type_is_sector_image(disk_type)) {
+                disk_read_trace.disk = disk;
+                disk_read_trace.disk_size = disk_size;
+                loaded = apple2_disk2_attach_drive_reader(&machine.disk2,
+                                                          0,
+                                                          disk_trace_read_sector,
+                                                          &disk_read_trace,
+                                                          disk_size,
+                                                          disk_image_order_for_type(disk_type));
+                disk_read_trace_active = loaded;
+            } else {
+                loaded = apple2_machine_load_drive0_do(&machine, disk, disk_size);
+            }
             break;
         case DISK_IMAGE_PO_PRODOS_ORDER:
         case DISK_IMAGE_DSK_PRODOS_ORDER:
-            loaded = apple2_machine_load_drive0_po(&machine, disk, disk_size);
+            if (!force_direct_disk_enabled &&
+                (trace_sector_reads_enabled || require_not_basic_prompt) &&
+                disk_type_is_sector_image(disk_type)) {
+                disk_read_trace.disk = disk;
+                disk_read_trace.disk_size = disk_size;
+                loaded = apple2_disk2_attach_drive_reader(&machine.disk2,
+                                                          0,
+                                                          disk_trace_read_sector,
+                                                          &disk_read_trace,
+                                                          disk_size,
+                                                          disk_image_order_for_type(disk_type));
+                disk_read_trace_active = loaded;
+            } else {
+                loaded = apple2_machine_load_drive0_po(&machine, disk, disk_size);
+            }
             break;
         case DISK_IMAGE_DSK_DOS_ORDER:
-            loaded = apple2_machine_load_drive0_dsk(&machine, disk, disk_size);
+            if (!force_direct_disk_enabled &&
+                (trace_sector_reads_enabled || require_not_basic_prompt) &&
+                disk_type_is_sector_image(disk_type)) {
+                disk_read_trace.disk = disk;
+                disk_read_trace.disk_size = disk_size;
+                loaded = apple2_disk2_attach_drive_reader(&machine.disk2,
+                                                          0,
+                                                          disk_trace_read_sector,
+                                                          &disk_read_trace,
+                                                          disk_size,
+                                                          disk_image_order_for_type(disk_type));
+                disk_read_trace_active = loaded;
+            } else {
+                loaded = apple2_machine_load_drive0_dsk(&machine, disk, disk_size);
+            }
             break;
         case DISK_IMAGE_NONE:
         default:
@@ -593,16 +801,37 @@ int main(void)
             disk_size != 0U &&
             (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER);
         const uint32_t instruction_limit =
-            expected_text != NULL ? custom_instruction_limit :
+            (expected_text != NULL || require_not_basic_prompt) ? custom_instruction_limit :
             expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 1500000U;
 
         for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        if (trace_app_boot_enabled) {
+            disk_trace_app_boot(&machine, i);
+        }
+        if (trace_pcs_enabled) {
+            recent_pcs[recent_pc_next] = cpu.pc;
+            recent_pc_next = (recent_pc_next + 1U) % PC_TRACE_ENTRIES;
+            if (recent_pc_count < PC_TRACE_ENTRIES) {
+                recent_pc_count++;
+            }
+        }
         if (cpu.pc >= 0xC600U && cpu.pc < 0xC700U) {
             entered_slot6 = true;
         }
         if (disk_size != 0U && cpu.pc >= 0x0800U && cpu.pc < 0x0C00U) {
             entered_boot1 = true;
+        }
+        if (disk_size != 0U && cpu.pc >= 0x07FDU && cpu.pc < 0x6900U) {
+            entered_loaded_binary = true;
+            last_loaded_binary_pc = cpu.pc;
+            if (trace_pcs_enabled) {
+                recent_app_pcs[recent_app_pc_next] = cpu.pc;
+                recent_app_pc_next = (recent_app_pc_next + 1U) % APP_PC_TRACE_ENTRIES;
+                if (recent_app_pc_count < APP_PC_TRACE_ENTRIES) {
+                    recent_app_pc_count++;
+                }
+            }
         }
         if (disk_size != 0U && cpu.pc >= 0x3700U && cpu.pc < 0x3800U) {
             entered_stage2 = true;
@@ -724,10 +953,58 @@ int main(void)
                     machine.disk2.q7 ? 1 : 0,
                     machine.disk2.data_latch,
                     machine.disk2.data_ready ? 1 : 0);
+            if (disk_read_trace_active) {
+                disk_dump_recent_sector_reads(&disk_read_trace);
+            }
+            if (trace_pcs_enabled) {
+                disk_dump_recent_pcs(recent_pcs, recent_pc_count, recent_pc_next);
+                disk_dump_recent_pcs(recent_app_pcs, recent_app_pc_count, recent_app_pc_next);
+            }
+            disk_dump_bytes(&machine, 0x03D0U, 32U);
+            disk_dump_bytes(&machine, 0x07FDU, 32U);
+            disk_dump_bytes(&machine, 0x9D80U, 64U);
+            disk_dump_bytes(&machine, 0xB7B0U, 64U);
+            disk_dump_bytes(&machine, 0xB940U, 128U);
+            disk_dump_bytes(&machine, 0xBDA0U, 64U);
             if (dump_screen != NULL && dump_screen[0] != '\0') {
                 disk_dump_screen(&machine);
             }
             return 14;
+        }
+
+        puts("apple2 ROM+disk custom smoke passed");
+        return 0;
+    }
+    if (disk_size != 0U && require_not_basic_prompt) {
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+
+        if (disk_screen_has_basic_prompt(&machine) &&
+            cpu.pc >= 0xB000U &&
+            cpu.pc < 0xC000U) {
+            fprintf(stderr,
+                    "Disk boot fell back to BASIC prompt instead of app state, pc=%04x qt=%u np=%u entered_app=%u last_app_pc=%04x\n",
+                    cpu.pc,
+                    machine.disk2.quarter_track[0],
+                    machine.disk2.nibble_pos[0],
+                    entered_loaded_binary ? 1U : 0U,
+                    last_loaded_binary_pc);
+            if (disk_read_trace_active) {
+                disk_dump_recent_sector_reads(&disk_read_trace);
+            }
+            if (trace_pcs_enabled) {
+                disk_dump_recent_pcs(recent_pcs, recent_pc_count, recent_pc_next);
+                disk_dump_recent_pcs(recent_app_pcs, recent_app_pc_count, recent_app_pc_next);
+            }
+            disk_dump_bytes(&machine, 0x03D0U, 32U);
+            disk_dump_bytes(&machine, 0x07FDU, 32U);
+            disk_dump_bytes(&machine, 0x9D80U, 64U);
+            disk_dump_bytes(&machine, 0xB7B0U, 64U);
+            disk_dump_bytes(&machine, 0xB940U, 128U);
+            disk_dump_bytes(&machine, 0xBDA0U, 64U);
+            if (dump_screen != NULL && dump_screen[0] != '\0') {
+                disk_dump_screen(&machine);
+            }
+            return 16;
         }
 
         puts("apple2 ROM+disk custom smoke passed");
@@ -738,6 +1015,9 @@ int main(void)
         fprintf(stderr,
                 "Disk boot did not preload track 0 pages, pc=%04x p3600=%02x p3700=%02x p3f00=%02x type=%d\n",
                 cpu.pc, machine.memory[0x3600], machine.memory[0x3700], machine.memory[0x3F00], (int)disk_type);
+        if (disk_read_trace_active) {
+            disk_dump_recent_sector_reads(&disk_read_trace);
+        }
         return 7;
     }
     if (disk_size != 0U && !entered_stage2) {
@@ -745,6 +1025,9 @@ int main(void)
         fprintf(stderr,
                 "Disk boot did not reach the DOS stage2 entry page, pc=%04x p3700=%02x p3701=%02x p3702=%02x\n",
                 cpu.pc, machine.memory[0x3700], machine.memory[0x3701], machine.memory[0x3702]);
+        if (disk_read_trace_active) {
+            disk_dump_recent_sector_reads(&disk_read_trace);
+        }
         return 8;
     }
     if (disk_size != 0U &&
@@ -755,6 +1038,9 @@ int main(void)
                 "Disk loader did not seek beyond track 0, pc=%04x qt=%u np=%u type=%d p1d00=%02x\n",
                 cpu.pc, machine.disk2.quarter_track[0], machine.disk2.nibble_pos[0], (int)disk_type,
                 machine.memory[0x1D00]);
+        if (disk_read_trace_active) {
+            disk_dump_recent_sector_reads(&disk_read_trace);
+        }
         return 9;
     }
     if (disk_size != 0U &&
@@ -766,6 +1052,9 @@ int main(void)
                 cpu.pc, machine.disk2.quarter_track[0], machine.disk2.nibble_pos[0],
                 machine.memory[apple2_text_row_address(false, 0U)],
                 machine.memory[apple2_text_row_address(false, 5U)]);
+        if (disk_read_trace_active) {
+            disk_dump_recent_sector_reads(&disk_read_trace);
+        }
         return 10;
     }
     if (disk_size != 0U &&
@@ -792,6 +1081,9 @@ int main(void)
                     cpu.pc, machine.key_latch,
                     machine.memory[apple2_text_row_address(false, 5U)],
                     machine.memory[apple2_text_row_address(false, 6U)]);
+            if (disk_read_trace_active) {
+                disk_dump_recent_sector_reads(&disk_read_trace);
+            }
             return 11;
         }
     }

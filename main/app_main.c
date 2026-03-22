@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "driver/sdspi_host.h"
+#include "driver/spi_master.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_vfs_fat.h"
@@ -58,6 +59,30 @@ typedef struct {
 } app_perf_counters_t;
 
 static app_perf_counters_t s_perf;
+static bool app_sd_read_sector(void *context,
+                               unsigned drive_index,
+                               uint8_t track,
+                               uint8_t file_sector,
+                               uint8_t *sector_data);
+
+#define APP_BOOT_TRACE_INTERVAL_US 200000LL
+#define APP_BOOT_TRACE_DURATION_US 8000000LL
+#define APP_BOOT_TRACE_MAX_LINES 40U
+#define APP_BOOT_TRACE_PC_HISTORY 64U
+
+typedef struct {
+    bool active;
+    bool loaded_code_dumped;
+    bool monitor_dumped;
+    int64_t until_us;
+    int64_t next_log_us;
+    uint32_t lines_emitted;
+    size_t recent_pc_next;
+    size_t recent_pc_count;
+    uint16_t recent_pcs[APP_BOOT_TRACE_PC_HISTORY];
+} app_boot_trace_t;
+
+static app_boot_trace_t s_boot_trace;
 
 #define APP_TEXT_ROWS 24U
 #define APP_TEXT_COLUMNS 40U
@@ -113,6 +138,9 @@ extern const uint8_t dos_3_3_woz_end[] asm("_binary_dos_3_3_woz_end");
 #define APP_DSK_PROBE_INSTRUCTIONS 900000U
 #define APP_DSK_PROBE_FALLBACK_INSTRUCTIONS 3000000U
 #define APP_SD_MOUNT_POINT "/sd"
+#define APP_SD_MOUNT_RETRY_DELAY_MS 25
+#define APP_SD_READ_RETRIES 3U
+#define APP_SD_READ_RETRY_DELAY_MS 1U
 #define APP_PERF_LOG_INTERVAL_US ((int64_t)CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS * 1000LL)
 
 typedef enum {
@@ -185,6 +213,9 @@ typedef struct {
 typedef struct {
     FILE *file;
     app_disk_image_type_t type;
+    apple2_disk2_image_order_t image_order;
+    uint8_t *image_data;
+    size_t image_size;
     apple2_woz_image_t *woz;
     bool sector_track_valid;
     uint8_t sector_track_index;
@@ -245,6 +276,12 @@ static void app_sd_rescan(void);
 static void app_sd_cycle_dsk_order(unsigned drive_index);
 static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t override);
 static void app_text_cache_reset(void);
+static void app_release_probe_machine(void);
+static bool app_sd_try_mount_filesystem(spi_host_device_t host_id,
+                                        const spi_bus_config_t *bus_config,
+                                        const esp_vfs_fat_sdmmc_mount_config_t *mount_config,
+                                        int max_freq_khz,
+                                        esp_err_t *err_out);
 
 #if defined(M5APPLE2_HAS_APPLE2PLUS_ROM) && defined(M5APPLE2_HAS_DISK2_ROM)
 static unsigned app_count_nonzero_range(const apple2_machine_t *machine, uint16_t base, uint16_t size)
@@ -358,6 +395,7 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
     if (s_probe_machine == NULL) {
         s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
         if (s_probe_machine == NULL) {
+            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine");
             return INT_MIN / 2;
         }
     }
@@ -507,6 +545,11 @@ static int app_dsk_probe_result_progress_rank(const app_dsk_probe_result_t *resu
     return rank;
 }
 
+static bool app_dsk_probe_score_valid(int score)
+{
+    return score > (INT_MIN / 4);
+}
+
 static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *source)
 {
     app_dsk_probe_result_t dos_result = { 0 };
@@ -563,6 +606,28 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
         }
     }
 
+    if (!app_dsk_probe_score_valid(dos_score) && !app_dsk_probe_score_valid(prodos_score)) {
+        ESP_LOGW(TAG,
+                 "Probed .dsk order unavailable: dos=%d prodos=%d, defaulting to DOS",
+                 dos_score,
+                 prodos_score);
+        return APP_DISK_ORDER_DOS33;
+    }
+    if (!app_dsk_probe_score_valid(prodos_score) && app_dsk_probe_score_valid(dos_score)) {
+        ESP_LOGI(TAG,
+                 "Probed .dsk order: dos=%d prodos=%d (DOS wins, ProDOS probe unavailable)",
+                 dos_score,
+                 prodos_score);
+        return APP_DISK_ORDER_DOS33;
+    }
+    if (!app_dsk_probe_score_valid(dos_score) && app_dsk_probe_score_valid(prodos_score)) {
+        ESP_LOGI(TAG,
+                 "Probed .dsk order: dos=%d prodos=%d (ProDOS wins, DOS probe unavailable)",
+                 dos_score,
+                 prodos_score);
+        return APP_DISK_ORDER_PRODOS;
+    }
+
     if (app_dsk_probe_result_is_advanced_loader(&dos_result) &&
         app_dsk_probe_result_is_monitor_fallback(&prodos_result)) {
         ESP_LOGI(TAG, "Probed .dsk order: dos=%d prodos=%d (advanced DOS wins)", dos_score, prodos_score);
@@ -586,10 +651,18 @@ static app_disk_order_t app_probe_dsk_order(const uint8_t *image, size_t image_s
         .image = image,
         .image_size = image_size,
     };
+    const app_disk_order_t order = app_probe_dsk_order_source(&source);
 
-    return app_probe_dsk_order_source(&source);
+    app_release_probe_machine();
+    return order;
 }
 #endif
+
+static void app_release_probe_machine(void)
+{
+    free(s_probe_machine);
+    s_probe_machine = NULL;
+}
 #endif
 
 static void app_puts_at(uint8_t row, uint8_t column, const char *text)
@@ -632,6 +705,232 @@ static void app_show_status_screen(const char *line1, const char *line2, const c
     app_puts_at(20, 2, "ESC RESETS THE EMULATOR");
 }
 
+static void app_text_row_ascii(uint8_t row, char *buffer, size_t buffer_size)
+{
+    uint16_t base;
+
+    if (buffer == NULL || buffer_size == 0U) {
+        return;
+    }
+    if (row >= APP_TEXT_ROWS) {
+        buffer[0] = '\0';
+        return;
+    }
+
+    base = apple2_text_row_address(s_machine.video.page2, row);
+    for (uint8_t column = 0; column < APP_TEXT_COLUMNS && (size_t)column + 1U < buffer_size; ++column) {
+        bool inverse = false;
+        const uint8_t ascii = apple2_text_code_to_ascii(s_machine.memory[(uint16_t)(base + column)], &inverse);
+
+        buffer[column] = (ascii >= 32U && ascii <= 126U) ? (char)ascii : '.';
+    }
+    buffer[APP_TEXT_COLUMNS] = '\0';
+    for (int column = APP_TEXT_COLUMNS - 1; column >= 0; --column) {
+        if (buffer[column] != ' ') {
+            break;
+        }
+        buffer[column] = '\0';
+    }
+}
+
+static void app_boot_trace_arm(const char *reason)
+{
+    const int64_t now_us = esp_timer_get_time();
+
+    s_boot_trace.active = true;
+    s_boot_trace.loaded_code_dumped = false;
+    s_boot_trace.monitor_dumped = false;
+    s_boot_trace.until_us = now_us + APP_BOOT_TRACE_DURATION_US;
+    s_boot_trace.next_log_us = now_us;
+    s_boot_trace.lines_emitted = 0U;
+    s_boot_trace.recent_pc_next = 0U;
+    s_boot_trace.recent_pc_count = 0U;
+    ESP_LOGI(TAG, "Boot trace armed: %s", reason);
+}
+
+static void app_boot_trace_record_pc(uint16_t pc)
+{
+    if (!s_boot_trace.active || s_boot_trace.monitor_dumped) {
+        return;
+    }
+
+    s_boot_trace.recent_pcs[s_boot_trace.recent_pc_next] = pc;
+    s_boot_trace.recent_pc_next = (s_boot_trace.recent_pc_next + 1U) % APP_BOOT_TRACE_PC_HISTORY;
+    if (s_boot_trace.recent_pc_count < APP_BOOT_TRACE_PC_HISTORY) {
+        s_boot_trace.recent_pc_count++;
+    }
+}
+
+static void app_boot_trace_dump_recent_pcs(void)
+{
+    const size_t count = s_boot_trace.recent_pc_count;
+    const size_t start = (count < APP_BOOT_TRACE_PC_HISTORY) ? 0U : s_boot_trace.recent_pc_next;
+
+    for (size_t i = 0; i < count; ++i) {
+        const size_t index = (start + i) % APP_BOOT_TRACE_PC_HISTORY;
+
+        ESP_LOGI(TAG, "boottrace recent_pc[%u]=%04x", (unsigned)i, s_boot_trace.recent_pcs[index]);
+    }
+}
+
+static void app_boot_trace_maybe_dump_transition(uint16_t pc)
+{
+    char row23[APP_TEXT_COLUMNS + 1U];
+
+    if (!s_boot_trace.active) {
+        return;
+    }
+
+    if (!s_boot_trace.loaded_code_dumped && pc >= 0x0800U && pc < 0xC000U) {
+        ESP_LOGI(TAG,
+                 "Boot trace entered loaded code pc=%04x bytes=%02x %02x %02x %02x",
+                 pc,
+                 s_machine.memory[pc],
+                 s_machine.memory[(uint16_t)(pc + 1U)],
+                 s_machine.memory[(uint16_t)(pc + 2U)],
+                 s_machine.memory[(uint16_t)(pc + 3U)]);
+        s_boot_trace.loaded_code_dumped = true;
+    }
+
+    if (!s_boot_trace.monitor_dumped && pc >= 0xFD1BU && pc <= 0xFD24U) {
+        app_text_row_ascii(23U, row23, sizeof(row23));
+        ESP_LOGI(TAG, "Boot trace monitor entry row23=\"%s\"", row23);
+        app_boot_trace_dump_recent_pcs();
+        s_boot_trace.monitor_dumped = true;
+    }
+}
+
+static void app_boot_trace_poll(int64_t now_us)
+{
+    char row23[APP_TEXT_COLUMNS + 1U];
+    const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&s_machine);
+    const uint8_t drive = s_machine.disk2.active_drive;
+
+    if (!s_boot_trace.active) {
+        return;
+    }
+    if (now_us >= s_boot_trace.until_us || s_boot_trace.lines_emitted >= APP_BOOT_TRACE_MAX_LINES) {
+        s_boot_trace.active = false;
+        ESP_LOGI(TAG, "Boot trace complete");
+        return;
+    }
+    if (now_us < s_boot_trace.next_log_us) {
+        return;
+    }
+
+    app_text_row_ascii(23U, row23, sizeof(row23));
+    ESP_LOGI(TAG,
+             "boottrace pc=%04x a=%02x x=%02x y=%02x p=%02x sp=%02x drive=%u qt=%u nib=%" PRIu32
+             " motor=%u q6=%u q7=%u latch=%02x text=%u row23=\"%s\"",
+             cpu.pc,
+             cpu.a,
+             cpu.x,
+             cpu.y,
+             cpu.p,
+             cpu.sp,
+             (unsigned)(drive + 1U),
+             s_machine.disk2.quarter_track[drive],
+             s_machine.disk2.nibble_pos[drive],
+             s_machine.disk2.motor_on ? 1U : 0U,
+             s_machine.disk2.q6 ? 1U : 0U,
+             s_machine.disk2.q7 ? 1U : 0U,
+             s_machine.disk2.data_latch,
+             s_machine.video.text_mode ? 1U : 0U,
+             row23);
+    s_boot_trace.lines_emitted++;
+    s_boot_trace.next_log_us += APP_BOOT_TRACE_INTERVAL_US;
+}
+
+static const char *app_disk_image_type_name(app_disk_image_type_t type)
+{
+    switch (type) {
+    case APP_DISK_IMAGE_DO:
+        return "DO";
+    case APP_DISK_IMAGE_PO:
+        return "PO";
+    case APP_DISK_IMAGE_DSK:
+        return "DSK";
+    case APP_DISK_IMAGE_NIB:
+        return "NIB";
+    case APP_DISK_IMAGE_WOZ:
+        return "WOZ";
+    case APP_DISK_IMAGE_NONE:
+    default:
+        return "none";
+    }
+}
+
+static void app_log_boot_drive_state(const char *action)
+{
+    for (unsigned drive_index = 0; drive_index < 2U; ++drive_index) {
+        if (!apple2_disk2_drive_loaded(&s_machine.disk2, drive_index)) {
+            ESP_LOGI(TAG, "%s drive %u: empty", action, drive_index + 1U);
+            continue;
+        }
+
+        if (s_sd_drive_index[drive_index] >= 0 &&
+            (size_t)s_sd_drive_index[drive_index] < s_sd_disk_count) {
+            const app_sd_disk_entry_t *disk = &s_sd_disks[s_sd_drive_index[drive_index]];
+
+            switch (disk->type) {
+            case APP_DISK_IMAGE_DO:
+            case APP_DISK_IMAGE_PO:
+            case APP_DISK_IMAGE_DSK:
+                ESP_LOGI(TAG,
+                         "%s drive %u: SD %s (%s, %s order)",
+                         action,
+                         drive_index + 1U,
+                         disk->name,
+                         app_disk_image_type_name(disk->type),
+                         (s_sd_drive_files[drive_index].image_order ==
+                          APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL)
+                             ? "ProDOS"
+                             : "DOS");
+                break;
+            default:
+                ESP_LOGI(TAG,
+                         "%s drive %u: SD %s (%s)",
+                         action,
+                         drive_index + 1U,
+                         disk->name,
+                         app_disk_image_type_name(disk->type));
+                break;
+            }
+            continue;
+        }
+
+        if (s_builtin_drives[drive_index].present) {
+            switch (s_builtin_drives[drive_index].type) {
+            case APP_DISK_IMAGE_DO:
+            case APP_DISK_IMAGE_PO:
+            case APP_DISK_IMAGE_DSK:
+                ESP_LOGI(TAG,
+                         "%s drive %u: builtin %s (%s, %s order)",
+                         action,
+                         drive_index + 1U,
+                         s_builtin_drives[drive_index].label,
+                         app_disk_image_type_name(s_builtin_drives[drive_index].type),
+                         (s_builtin_drives[drive_index].image_order ==
+                          APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL)
+                             ? "ProDOS"
+                             : "DOS");
+                break;
+            default:
+                ESP_LOGI(TAG,
+                         "%s drive %u: builtin %s (%s)",
+                         action,
+                         drive_index + 1U,
+                         s_builtin_drives[drive_index].label,
+                         app_disk_image_type_name(s_builtin_drives[drive_index].type));
+                break;
+            }
+            continue;
+        }
+
+        ESP_LOGI(TAG, "%s drive %u: loaded, source unknown", action, drive_index + 1U);
+    }
+}
+
 static void app_boot_slot6(void)
 {
     if (!s_machine.slot6_rom_loaded) {
@@ -639,6 +938,8 @@ static void app_boot_slot6(void)
         return;
     }
 
+    app_log_boot_drive_state("Boot slot6");
+    app_boot_trace_arm("boot slot6");
     apple2_machine_set_pc(&s_machine, 0xC600U);
     ESP_LOGI(TAG, "Jumped to slot 6 boot ROM");
 }
@@ -653,6 +954,8 @@ static void app_reset_and_boot_slot6(bool rom_loaded)
     }
     apple2_machine_reset(&s_machine);
     app_text_cache_reset();
+    app_log_boot_drive_state("Cold reset");
+    app_boot_trace_arm("cold reset");
     ESP_LOGI(TAG, "Cold reset with current drive mounts");
 }
 
@@ -1386,6 +1689,102 @@ static bool app_sd_parse_woz_file(FILE *file, apple2_woz_image_t *woz)
     return true;
 }
 
+static bool app_sd_read_file_with_retries(FILE *file,
+                                          long offset,
+                                          void *buffer,
+                                          size_t size,
+                                          unsigned drive_index,
+                                          const char *label,
+                                          unsigned item_index)
+{
+    for (unsigned attempt = 0; attempt < APP_SD_READ_RETRIES; ++attempt) {
+        clearerr(file);
+        if (fseek(file, offset, SEEK_SET) == 0 && fread(buffer, 1, size, file) == size) {
+            if (attempt > 0U) {
+                ESP_LOGW(TAG,
+                         "Recovered SD read drive=%u %s=%u offset=%ld size=%u after %u retries",
+                         drive_index + 1U,
+                         label,
+                         item_index,
+                         offset,
+                         (unsigned)size,
+                         attempt);
+            }
+            return true;
+        }
+        if ((attempt + 1U) < APP_SD_READ_RETRIES) {
+            vTaskDelay(pdMS_TO_TICKS(APP_SD_READ_RETRY_DELAY_MS));
+        }
+    }
+
+    ESP_LOGW(TAG,
+             "SD read failed drive=%u %s=%u offset=%ld size=%u",
+             drive_index + 1U,
+             label,
+             item_index,
+             offset,
+             (unsigned)size);
+    return false;
+}
+
+static bool app_sd_load_sector_image(app_sd_drive_file_t *drive, unsigned drive_index)
+{
+    if (drive == NULL || drive->file == NULL) {
+        return false;
+    }
+    if (drive->image_data == NULL) {
+        drive->image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
+        if (drive->image_data == NULL) {
+            return false;
+        }
+        drive->image_size = APPLE2_DISK2_IMAGE_SIZE;
+    }
+    if (!app_sd_read_file_with_retries(drive->file,
+                                       0L,
+                                       drive->image_data,
+                                       drive->image_size,
+                                       drive_index,
+                                       "image",
+                                       0U)) {
+        return false;
+    }
+    fclose(drive->file);
+    drive->file = NULL;
+    return true;
+}
+
+static bool app_sd_attach_sector_image(unsigned drive_index, apple2_disk2_image_order_t image_order)
+{
+    app_sd_drive_file_t *drive = &s_sd_drive_files[drive_index];
+
+    if (app_sd_load_sector_image(drive, drive_index)) {
+        return apple2_disk2_load_drive_with_order(&s_machine.disk2,
+                                                  drive_index,
+                                                  drive->image_data,
+                                                  drive->image_size,
+                                                  image_order);
+    }
+    if (drive->image_data == NULL) {
+        ESP_LOGW(TAG,
+                 "Falling back to streamed sector reads for drive %u (no room for %u-byte cache)",
+                 drive_index + 1U,
+                 (unsigned)APPLE2_DISK2_IMAGE_SIZE);
+    } else {
+        ESP_LOGW(TAG,
+                 "Falling back to streamed sector reads for drive %u after preload failed",
+                 drive_index + 1U);
+        free(drive->image_data);
+        drive->image_data = NULL;
+        drive->image_size = 0U;
+    }
+    return apple2_disk2_attach_drive_reader(&s_machine.disk2,
+                                            drive_index,
+                                            app_sd_read_sector,
+                                            drive,
+                                            APPLE2_DISK2_IMAGE_SIZE,
+                                            image_order);
+}
+
 static bool app_sd_read_sector(void *context,
                                unsigned drive_index,
                                uint8_t track,
@@ -1412,12 +1811,13 @@ static bool app_sd_read_sector(void *context,
     if (!drive->sector_track_valid || drive->sector_track_index != track) {
         const long offset = (long)((size_t)track * APP_SD_TRACK_BYTES);
 
-        if (fseek(drive->file, offset, SEEK_SET) != 0) {
-            drive->sector_track_valid = false;
-            return false;
-        }
-        if (fread(drive->sector_track_data, 1, APP_SD_TRACK_BYTES, drive->file) !=
-            APP_SD_TRACK_BYTES) {
+        if (!app_sd_read_file_with_retries(drive->file,
+                                           offset,
+                                           drive->sector_track_data,
+                                           APP_SD_TRACK_BYTES,
+                                           drive_index,
+                                           "track",
+                                           track)) {
             drive->sector_track_valid = false;
             return false;
         }
@@ -1439,7 +1839,6 @@ static bool app_sd_read_track(void *context,
     long offset;
     size_t length;
 
-    (void)drive_index;
     if (drive == NULL || drive->file == NULL || track_data == NULL || track_length == NULL) {
         return false;
     }
@@ -1474,10 +1873,13 @@ static bool app_sd_read_track(void *context,
     if (length == 0U || length > APPLE2_DISK2_MAX_TRACK_BYTES) {
         return false;
     }
-    if (fseek(drive->file, offset, SEEK_SET) != 0) {
-        return false;
-    }
-    if (fread(track_data, 1, length, drive->file) != length) {
+    if (!app_sd_read_file_with_retries(drive->file,
+                                       offset,
+                                       track_data,
+                                       length,
+                                       drive_index,
+                                       "quarter_track",
+                                       quarter_track)) {
         return false;
     }
 
@@ -1516,11 +1918,16 @@ static void app_sd_close_drive(unsigned drive_index)
     if (drive_index >= 2U) {
         return;
     }
+    apple2_disk2_unload_drive(&s_machine.disk2, drive_index);
     if (s_sd_drive_files[drive_index].file != NULL) {
         fclose(s_sd_drive_files[drive_index].file);
         s_sd_drive_files[drive_index].file = NULL;
     }
     s_sd_drive_files[drive_index].type = APP_DISK_IMAGE_NONE;
+    s_sd_drive_files[drive_index].image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
+    free(s_sd_drive_files[drive_index].image_data);
+    s_sd_drive_files[drive_index].image_data = NULL;
+    s_sd_drive_files[drive_index].image_size = 0U;
     s_sd_drive_files[drive_index].sector_track_valid = false;
     free(s_sd_drive_files[drive_index].sector_track_data);
     s_sd_drive_files[drive_index].sector_track_data = NULL;
@@ -1534,6 +1941,45 @@ static int app_sd_disk_compare(const void *lhs, const void *rhs)
     const app_sd_disk_entry_t *right = rhs;
 
     return strcasecmp(left->name, right->name);
+}
+
+static bool app_sd_try_mount_filesystem(spi_host_device_t host_id,
+                                        const spi_bus_config_t *bus_config,
+                                        const esp_vfs_fat_sdmmc_mount_config_t *mount_config,
+                                        int max_freq_khz,
+                                        esp_err_t *err_out)
+{
+    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
+    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
+    esp_err_t err;
+
+    err = spi_bus_initialize(host_id, bus_config, SPI_DMA_CH_AUTO);
+    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
+        if (err_out != NULL) {
+            *err_out = err;
+        }
+        return false;
+    }
+
+    host.slot = host_id;
+    host.max_freq_khz = max_freq_khz;
+    slot_config.host_id = host_id;
+    slot_config.gpio_cs = CONFIG_M5APPLE2_SD_PIN_CS;
+
+    ESP_LOGI(TAG,
+             "SD init host=%d cs=%d mosi=%d miso=%d clk=%d freq=%dkHz",
+             (int)host_id,
+             CONFIG_M5APPLE2_SD_PIN_CS,
+             CONFIG_M5APPLE2_SD_PIN_MOSI,
+             CONFIG_M5APPLE2_SD_PIN_MISO,
+             CONFIG_M5APPLE2_SD_PIN_CLK,
+             max_freq_khz);
+
+    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_config, mount_config, &s_sd_card);
+    if (err_out != NULL) {
+        *err_out = err;
+    }
+    return err == ESP_OK;
 }
 
 static bool app_sd_mount_filesystem(void)
@@ -1555,33 +2001,43 @@ static bool app_sd_mount_filesystem(void)
         .max_files = 4,
         .allocation_unit_size = 16 * 1024,
     };
-    sdmmc_host_t host = SDSPI_HOST_DEFAULT();
-    sdspi_device_config_t slot_config = SDSPI_DEVICE_CONFIG_DEFAULT();
     esp_err_t err;
+    const int configured_freq_khz = CONFIG_M5APPLE2_SD_MAX_FREQ_KHZ;
+    static const int s_fallback_freqs_khz[] = { 10000, 4000, 1000 };
 
     if (s_sd_mounted) {
         return true;
     }
 
-    err = spi_bus_initialize(host_id, &bus_config, SPI_DMA_CH_AUTO);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        ESP_LOGW(TAG, "SD SPI bus init failed: %s", esp_err_to_name(err));
-        return false;
+    s_sd_card = NULL;
+    if (app_sd_try_mount_filesystem(host_id, &bus_config, &mount_config, configured_freq_khz, &err)) {
+        s_sd_mounted = true;
+        ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
+        return true;
+    }
+    ESP_LOGW(TAG, "SD mount attempt failed at %dkHz: %s", configured_freq_khz, esp_err_to_name(err));
+    s_sd_card = NULL;
+    (void)spi_bus_free(host_id);
+
+    for (size_t i = 0; i < (sizeof(s_fallback_freqs_khz) / sizeof(s_fallback_freqs_khz[0])); ++i) {
+        const int freq_khz = s_fallback_freqs_khz[i];
+
+        if (freq_khz >= configured_freq_khz) {
+            continue;
+        }
+        vTaskDelay(pdMS_TO_TICKS(APP_SD_MOUNT_RETRY_DELAY_MS));
+        if (app_sd_try_mount_filesystem(host_id, &bus_config, &mount_config, freq_khz, &err)) {
+            s_sd_mounted = true;
+            ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
+            return true;
+        }
+        ESP_LOGW(TAG, "SD mount attempt failed at %dkHz: %s", freq_khz, esp_err_to_name(err));
+        s_sd_card = NULL;
+        (void)spi_bus_free(host_id);
     }
 
-    host.slot = host_id;
-    slot_config.host_id = host_id;
-    slot_config.gpio_cs = CONFIG_M5APPLE2_SD_PIN_CS;
-
-    err = esp_vfs_fat_sdspi_mount(APP_SD_MOUNT_POINT, &host, &slot_config, &mount_config, &s_sd_card);
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "SD mount failed: %s", esp_err_to_name(err));
-        return false;
-    }
-
-    s_sd_mounted = true;
-    ESP_LOGI(TAG, "Mounted SD card at %s", APP_SD_MOUNT_POINT);
-    return true;
+    ESP_LOGW(TAG, "SD mount failed: %s", esp_err_to_name(err));
+    return false;
 #endif
 }
 
@@ -1681,6 +2137,7 @@ static bool app_sd_probe_file_order(const char *path)
 #endif
     fclose(probe.file);
     free(probe.sector_track_data);
+    app_release_probe_machine();
     s_perf.dsk_probe_us += (uint64_t)(esp_timer_get_time() - start_us);
     s_perf.dsk_probes++;
     return order == APP_DISK_ORDER_PRODOS;
@@ -1780,6 +2237,7 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
         return false;
     }
     s_sd_drive_files[drive_index].type = disk->type;
+    s_sd_drive_files[drive_index].image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
     if (disk->type == APP_DISK_IMAGE_WOZ && s_sd_drive_files[drive_index].woz == NULL) {
         s_sd_drive_files[drive_index].woz = calloc(1U, sizeof(*s_sd_drive_files[drive_index].woz));
         if (s_sd_drive_files[drive_index].woz == NULL) {
@@ -1799,12 +2257,8 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     switch (disk->type) {
     case APP_DISK_IMAGE_PO:
         image_order = APPLE2_DISK2_IMAGE_ORDER_PRODOS_LOGICAL;
-        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
-                                                    drive_index,
-                                                    app_sd_read_sector,
-                                                    &s_sd_drive_files[drive_index],
-                                                    APPLE2_DISK2_IMAGE_SIZE,
-                                                    image_order);
+        s_sd_drive_files[drive_index].image_order = image_order;
+        attached = app_sd_attach_sector_image(drive_index, image_order);
         break;
     case APP_DISK_IMAGE_DSK:
         switch (s_sd_dsk_order_override[drive_index]) {
@@ -1821,12 +2275,8 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
                               : APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
             break;
         }
-        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
-                                                    drive_index,
-                                                    app_sd_read_sector,
-                                                    &s_sd_drive_files[drive_index],
-                                                    APPLE2_DISK2_IMAGE_SIZE,
-                                                    image_order);
+        s_sd_drive_files[drive_index].image_order = image_order;
+        attached = app_sd_attach_sector_image(drive_index, image_order);
         break;
     case APP_DISK_IMAGE_NIB:
     case APP_DISK_IMAGE_WOZ:
@@ -1838,12 +2288,8 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     case APP_DISK_IMAGE_DO:
     default:
         image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
-        attached = apple2_disk2_attach_drive_reader(&s_machine.disk2,
-                                                    drive_index,
-                                                    app_sd_read_sector,
-                                                    &s_sd_drive_files[drive_index],
-                                                    APPLE2_DISK2_IMAGE_SIZE,
-                                                    image_order);
+        s_sd_drive_files[drive_index].image_order = image_order;
+        attached = app_sd_attach_sector_image(drive_index, image_order);
         break;
     }
 
@@ -2370,8 +2816,19 @@ void app_main(void)
                     const int64_t slice_start_us = esp_timer_get_time();
 #endif
 
-                    apple2_machine_step(&s_machine, budget);
-                    executed_cycles = s_machine.total_cycles - previous_cycles;
+                    if (s_boot_trace.active) {
+                        executed_cycles = 0U;
+                        while (executed_cycles < budget) {
+                            const uint16_t pc = apple2_machine_cpu_state(&s_machine).pc;
+
+                            app_boot_trace_maybe_dump_transition(pc);
+                            app_boot_trace_record_pc(pc);
+                            executed_cycles += apple2_machine_step_instruction(&s_machine);
+                        }
+                    } else {
+                        apple2_machine_step(&s_machine, budget);
+                        executed_cycles = s_machine.total_cycles - previous_cycles;
+                    }
                     s_perf.emulated_cycles += executed_cycles;
 #if CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
                     {
@@ -2466,6 +2923,7 @@ void app_main(void)
             last_frame_tick_us += ((now_us - last_frame_tick_us) / APP_FRAME_INTERVAL_US) * APP_FRAME_INTERVAL_US;
         }
 
+        app_boot_trace_poll(now_us);
         app_perf_log_if_due(now_us);
         if (s_sd_picker.active) {
             vTaskDelay(pdMS_TO_TICKS(1));

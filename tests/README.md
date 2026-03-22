@@ -42,3 +42,20 @@ sh tests/run_rom_smoke.sh
 
 If a custom disk needs more runtime, override the host smoke budget with
 `APPLE2_TEST_INSTRUCTION_LIMIT`.
+
+For sector-image loader debugging, set `APPLE2_TEST_TRACE_SECTOR_READS=1`.
+That boots `.do`, `.po`, and `.dsk` images through the reader callback path and
+prints the most recent sector reads on failure, which is useful when a disk
+gets back to `]` instead of reaching the app.
+
+The older `VisiCalc 1.37 - 1979.dsk` is a good opt-in regression target for
+that path:
+
+```sh
+APPLE2_TEST_DISK='disks/VisiCalc 1.37 - 1979.dsk' \
+APPLE2_TEST_EXPECT_NOT_BASIC_PROMPT=1 \
+APPLE2_TEST_TRACE_SECTOR_READS=1 \
+APPLE2_TEST_INSTRUCTION_LIMIT=40000000 \
+APPLE2_TEST_DUMP_SCREEN=1 \
+sh tests/run_rom_smoke.sh
+```

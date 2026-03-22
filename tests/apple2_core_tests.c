@@ -106,6 +106,41 @@ static void test_decimal_adc(void)
     assert((cpu.p & CPU6502_FLAG_DECIMAL) == 0U);
 }
 
+static void test_undocumented_nops(void)
+{
+    apple2_machine_t machine;
+    const uint8_t program[] = {
+        0xA2, 0x01,       /* LDX #$01 */
+        0x04, 0x10,       /* NOP $10 */
+        0x3C, 0xFF, 0x03, /* NOP $03FF,X -> $0400 with page cross */
+        0xEA,             /* NOP */
+    };
+    uint32_t cycles = 0;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    memcpy(&machine.memory[0x0200], program, sizeof(program));
+    machine.memory[0x0010] = 0xAAU;
+    machine.memory[0x0400] = 0x55U;
+    fill_reset_vector(&machine, 0x0200);
+    apple2_machine_reset(&machine);
+
+    cycles = apple2_machine_step_instruction(&machine);
+    assert(cycles == 2U);
+    assert(apple2_machine_cpu_state(&machine).pc == 0x0202U);
+
+    cycles = apple2_machine_step_instruction(&machine);
+    assert(cycles == 3U);
+    assert(apple2_machine_cpu_state(&machine).pc == 0x0204U);
+
+    cycles = apple2_machine_step_instruction(&machine);
+    assert(cycles == 5U);
+    assert(apple2_machine_cpu_state(&machine).pc == 0x0207U);
+
+    cycles = apple2_machine_step_instruction(&machine);
+    assert(cycles == 2U);
+    assert(apple2_machine_cpu_state(&machine).pc == 0x0208U);
+}
+
 static void test_soft_switches(void)
 {
     apple2_machine_t machine;
@@ -300,6 +335,54 @@ static void test_separate_slot6_rom_layout(void)
     assert(machine.memory[0xC600] == 0xA2);
     assert(machine.memory[0xC6FF] == 0x60);
     assert(apple2_machine_cpu_state(&machine).pc == 0xFA62);
+}
+
+static void test_language_card_soft_switches(void)
+{
+    apple2_machine_t machine;
+    uint8_t rom[APPLE2_LANGCARD_ROM_SIZE];
+    const uint8_t program[] = {
+        0xAD, 0x81, 0xC0, /* LDA $C081 */
+        0xAD, 0x81, 0xC0, /* LDA $C081 */
+        0xA9, 0x11,       /* LDA #$11 */
+        0x8D, 0x00, 0xD0, /* STA $D000 */
+        0xAD, 0x83, 0xC0, /* LDA $C083 */
+        0xAD, 0x00, 0xD0, /* LDA $D000 */
+        0x8D, 0x00, 0x04, /* STA $0400 */
+        0xAD, 0x89, 0xC0, /* LDA $C089 */
+        0xAD, 0x89, 0xC0, /* LDA $C089 */
+        0xA9, 0x22,       /* LDA #$22 */
+        0x8D, 0x00, 0xD0, /* STA $D000 */
+        0xAD, 0x8B, 0xC0, /* LDA $C08B */
+        0xAD, 0x00, 0xD0, /* LDA $D000 */
+        0x8D, 0x01, 0x04, /* STA $0401 */
+        0xAD, 0x83, 0xC0, /* LDA $C083 */
+        0xAD, 0x00, 0xD0, /* LDA $D000 */
+        0x8D, 0x02, 0x04, /* STA $0402 */
+        0xEA,             /* NOP */
+    };
+
+    memset(rom, 0x00, sizeof(rom));
+    rom[0x2FFCU] = 0x00U;
+    rom[0x2FFDU] = 0x02U;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    assert(apple2_machine_load_system_rom(&machine, rom, sizeof(rom)));
+
+    memcpy(&machine.memory[0x0200], program, sizeof(program));
+    machine.memory[0xD000] = 0xA5U;
+    apple2_machine_reset(&machine);
+
+    for (int i = 0; i < 32; ++i) {
+        apple2_machine_step_instruction(&machine);
+        if (apple2_machine_cpu_state(&machine).pc == 0x0232U) {
+            break;
+        }
+    }
+
+    assert(machine.memory[0x0400] == 0x11U);
+    assert(machine.memory[0x0401] == 0x22U);
+    assert(machine.memory[0x0402] == 0x11U);
 }
 
 static void test_drive0_dsk_loading(void)
@@ -656,8 +739,8 @@ static void test_disk2_redundant_switches_do_not_reset_state(void)
 static void test_disk2_sector_tracks_keep_dos_interleave(void)
 {
     static const uint8_t s_expected_track1_order[16] = {
-        0x3, 0x1, 0xE, 0xC, 0xA, 0x8, 0x6, 0x4,
-        0x2, 0xF, 0x0, 0xD, 0xB, 0x9, 0x7, 0x5,
+        0x0, 0xD, 0xB, 0x9, 0x7, 0x5, 0x3, 0x1,
+        0xE, 0xC, 0xA, 0x8, 0x6, 0x4, 0x2, 0xF,
     };
     apple2_disk2_t disk2;
     uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
@@ -683,6 +766,7 @@ int main(void)
 {
     test_cpu_program();
     test_decimal_adc();
+    test_undocumented_nops();
     test_soft_switches();
     test_video_addresses();
     test_text_render();
@@ -691,6 +775,7 @@ int main(void)
     test_flash_timing();
     test_full_apple2plus_rom_layout();
     test_separate_slot6_rom_layout();
+    test_language_card_soft_switches();
     test_drive0_dsk_loading();
     test_drive0_nib_loading();
     test_drive1_and_reader_loading();

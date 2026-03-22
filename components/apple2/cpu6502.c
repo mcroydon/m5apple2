@@ -1,6 +1,77 @@
 #include "apple2/cpu6502.h"
 
+#include <inttypes.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#if !defined(ESP_PLATFORM)
+static bool cpu_trace_illegal_enabled(void)
+{
+    static int cached = -1;
+
+    if (cached < 0) {
+        const char *enabled = getenv("APPLE2_TRACE_ILLEGAL_OPCODES");
+
+        cached = (enabled != NULL && enabled[0] != '\0') ? 1 : 0;
+    }
+
+    return cached != 0;
+}
+
+static bool cpu_trace_disk_io_enabled(void)
+{
+    static int cached = -1;
+
+    if (cached < 0) {
+        const char *enabled = getenv("APPLE2_TRACE_DISK_IO");
+
+        cached = (enabled != NULL && enabled[0] != '\0') ? 1 : 0;
+    }
+
+    return cached != 0;
+}
+
+static void cpu_trace_disk_io(const cpu6502_t *cpu, uint16_t address, bool write_cycle, uint8_t value)
+{
+    if (!cpu_trace_disk_io_enabled() || cpu->bus.disk2 == NULL) {
+        return;
+    }
+
+    fprintf(stderr,
+            "DISK %c %04x=%02x pc=%04x drive=%u qt=%u np=%" PRIu32 " q6=%u q7=%u ready=%u latch=%02x motor=%u\n",
+            write_cycle ? 'W' : 'R',
+            address,
+            value,
+            cpu->pc,
+            cpu->bus.disk2->active_drive,
+            cpu->bus.disk2->quarter_track[cpu->bus.disk2->active_drive],
+            cpu->bus.disk2->nibble_pos[cpu->bus.disk2->active_drive],
+            cpu->bus.disk2->q6 ? 1U : 0U,
+            cpu->bus.disk2->q7 ? 1U : 0U,
+            cpu->bus.disk2->data_ready ? 1U : 0U,
+            cpu->bus.disk2->data_latch,
+            cpu->bus.disk2->motor_on ? 1U : 0U);
+}
+#else
+static bool cpu_trace_illegal_enabled(void)
+{
+    return false;
+}
+
+static bool cpu_trace_disk_io_enabled(void)
+{
+    return false;
+}
+
+static void cpu_trace_disk_io(const cpu6502_t *cpu, uint16_t address, bool write_cycle, uint8_t value)
+{
+    (void)cpu;
+    (void)address;
+    (void)write_cycle;
+    (void)value;
+}
+#endif
 
 static inline uint8_t cpu_read(cpu6502_t *cpu, uint16_t address)
 {
@@ -14,6 +85,7 @@ static inline uint8_t cpu_read(cpu6502_t *cpu, uint16_t address)
     }
     if (cpu->bus.disk2 != NULL && address >= 0xC0E0U && address <= 0xC0EFU) {
         const uint8_t value = apple2_disk2_access(cpu->bus.disk2, (uint8_t)(address & 0x0FU));
+        cpu_trace_disk_io(cpu, address, false, value);
         if (cpu->bus.data_latch != NULL) {
             *cpu->bus.data_latch = value;
         }
@@ -36,6 +108,7 @@ static inline void cpu_write(cpu6502_t *cpu, uint16_t address, uint8_t value)
             *cpu->bus.data_latch = value;
         }
         (void)apple2_disk2_access(cpu->bus.disk2, (uint8_t)(address & 0x0FU));
+        cpu_trace_disk_io(cpu, address, true, value);
         return;
     }
     cpu->bus.write(cpu->bus.context, address, value);
@@ -1155,8 +1228,67 @@ uint32_t cpu6502_step(cpu6502_t *cpu)
         cpu_set_nz(cpu, value);
         cycles = 7;
         break;
+    case 0x1A:
+    case 0x3A:
+    case 0x5A:
+    case 0x7A:
+    case 0xDA:
+    case 0xFA:
+        cycles = 2;
+        break;
+    case 0x80:
+    case 0x82:
+    case 0x89:
+    case 0xC2:
+    case 0xE2:
+        (void)cpu_fetch_byte(cpu);
+        cycles = 2;
+        break;
+    case 0x04:
+    case 0x44:
+    case 0x64:
+        address = cpu_addr_zp(cpu);
+        (void)cpu_read(cpu, address);
+        cycles = 3;
+        break;
+    case 0x14:
+    case 0x34:
+    case 0x54:
+    case 0x74:
+    case 0xD4:
+    case 0xF4:
+        address = cpu_addr_zpx(cpu);
+        (void)cpu_read(cpu, address);
+        cycles = 4;
+        break;
+    case 0x0C:
+        address = cpu_addr_abs(cpu);
+        (void)cpu_read(cpu, address);
+        cycles = 4;
+        break;
+    case 0x1C:
+    case 0x3C:
+    case 0x5C:
+    case 0x7C:
+    case 0xDC:
+    case 0xFC:
+        address = cpu_addr_absx(cpu, &page_crossed);
+        (void)cpu_read(cpu, address);
+        cycles = 4 + (page_crossed ? 1U : 0U);
+        break;
 
     default:
+        if (cpu_trace_illegal_enabled()) {
+            fprintf(stderr,
+                    "CPU illegal opcode %02x at pc=%04x a=%02x x=%02x y=%02x sp=%02x p=%02x\n",
+                    opcode,
+                    (uint16_t)(cpu->pc - 1U),
+                    cpu->a,
+                    cpu->x,
+                    cpu->y,
+                    cpu->sp,
+                    cpu->p);
+        }
         cycles = 2;
         break;
     }
