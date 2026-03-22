@@ -367,6 +367,10 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
     switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
+        if (machine->speaker_toggle_fn != NULL) {
+            machine->speaker_toggle_fn(machine->speaker_toggle_context,
+                                        machine->total_cycles);
+        }
         return apple2_bus_value(machine, machine->floating_bus);
     case 0xC050:
         machine->video.text_mode = false;
@@ -475,6 +479,10 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
     switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
+        if (machine->speaker_toggle_fn != NULL) {
+            machine->speaker_toggle_fn(machine->speaker_toggle_context,
+                                        machine->total_cycles);
+        }
         return;
     case 0xC050:
         machine->video.text_mode = false;
@@ -731,6 +739,14 @@ bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *ima
 bool apple2_machine_load_drive1_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
     return apple2_disk2_load_nib_drive(&machine->disk2, 1, image, image_size);
+}
+
+void apple2_machine_set_speaker_callback(apple2_machine_t *machine,
+                                          apple2_speaker_toggle_fn fn,
+                                          void *context)
+{
+    machine->speaker_toggle_fn = fn;
+    machine->speaker_toggle_context = context;
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)
