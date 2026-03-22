@@ -166,4 +166,18 @@ config M5APPLE2_SD_PIN_CS
     depends on M5APPLE2_SD_ENABLE
     default 12
 
+config M5APPLE2_AUDIO_ENABLED
+    bool "Enable speaker audio output"
+    default y
+
+config M5APPLE2_AUDIO_SAMPLE_RATE
+    int "Audio sample rate (Hz)"
+    default 22050
+    depends on M5APPLE2_AUDIO_ENABLED
+
+config M5APPLE2_AUDIO_BUFFER_SAMPLES
+    int "Audio buffer size (samples)"
+    default 512
+    depends on M5APPLE2_AUDIO_ENABLED
+
 endmenu
