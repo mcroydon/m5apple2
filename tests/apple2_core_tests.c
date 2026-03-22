@@ -815,6 +815,39 @@ static void test_disk2_sector_tracks_keep_dos_interleave(void)
     assert(memcmp(sectors, s_expected_track1_order, sizeof(sectors)) == 0);
 }
 
+static void test_game_io_stubs(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    /* Push buttons $C061-$C063 should return $00 (not pressed). */
+    for (uint16_t addr = 0xC061U; addr <= 0xC063U; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_step_instruction(&machine);
+        assert((apple2_machine_cpu_state(&machine).a & 0x80U) == 0x00U);
+    }
+
+    /* Paddle timers $C064-$C067 should return $00 (timer expired). */
+    for (uint16_t addr = 0xC064U; addr <= 0xC067U; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_step_instruction(&machine);
+        assert((apple2_machine_cpu_state(&machine).a & 0x80U) == 0x00U);
+    }
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -839,6 +872,7 @@ int main(void)
     test_disk2_stepper_quarter_tracks();
     test_disk2_redundant_switches_do_not_reset_state();
     test_disk2_sector_tracks_keep_dos_interleave();
+    test_game_io_stubs();
     puts("apple2 core tests passed");
     return 0;
 }

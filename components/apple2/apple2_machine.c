@@ -416,6 +416,15 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
     case 0xC05F:
         machine->annunciator_state |= 0x08U;
         return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC061:
+    case 0xC062:
+    case 0xC063:
+        return apple2_bus_value(machine, 0x00U); /* Push buttons: not pressed. */
+    case 0xC064:
+    case 0xC065:
+    case 0xC066:
+    case 0xC067:
+        return apple2_bus_value(machine, 0x00U); /* Paddle timers: expired. */
     default:
         break;
     }
