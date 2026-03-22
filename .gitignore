@@ -9,9 +9,5 @@ tests/apple2_core_tests
 tests/cardputer_keymap_tests
 tests/apple2_rom_smoke
 main/generated_assets/
-roms/*.rom
-roms/*.do
-roms/*.po
-roms/*.dsk
-roms/*.nib
-roms/*.woz
+roms/*
+disks/*
