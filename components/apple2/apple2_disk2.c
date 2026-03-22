@@ -434,7 +434,13 @@ static void disk2_set_phase(apple2_disk2_t *disk2, uint8_t phase_index, bool ena
                         }
 
                         if (disk2_track_cache_key_for_drive(disk2, drive, *quarter_track) != old_cache_key) {
+                            if (disk2->track_cache_dirty) {
+                                apple2_disk2_flush(disk2);
+                            }
                             disk2->track_cache_valid = false;
+                            if (disk2->motor_on) {
+                                (void)disk2_build_track_cache(disk2);
+                            }
                         }
 
                         disk2->stream_accum[drive] = 0U;

@@ -1063,6 +1063,34 @@ static void test_disk2_tick_multi_advance(void)
     assert(after_pos - initial_pos <= 8U);
 }
 
+static void test_disk2_eager_cache_on_seek(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+
+    memset(image, 0x00, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_drive_with_order(&disk2, 0, image, sizeof(image),
+                                               APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL));
+
+    /* Motor on, build initial track cache at track 0. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.track_cache_valid);
+    assert(disk2.quarter_track[0] == 0U);
+
+    /* Step to track 1 (quarter_track 4) using full stepper sequence:
+       phase 0 on, phase 1 on, phase 0 off, phase 2 on, phase 1 off. */
+    (void)apple2_disk2_access(&disk2, 0x1U); /* Phase 0 on. */
+    (void)apple2_disk2_access(&disk2, 0x3U); /* Phase 1 on. */
+    (void)apple2_disk2_access(&disk2, 0x0U); /* Phase 0 off. */
+    (void)apple2_disk2_access(&disk2, 0x5U); /* Phase 2 on. */
+    (void)apple2_disk2_access(&disk2, 0x2U); /* Phase 1 off. */
+    assert(disk2.quarter_track[0] == 4U);
+
+    /* Cache should already be valid for the new track (eager rebuild). */
+    assert(disk2.track_cache_valid);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -1092,6 +1120,7 @@ int main(void)
     test_disk2_tick_multi_advance();
     test_disk2_write_mode();
     test_disk2_write_flush_roundtrip();
+    test_disk2_eager_cache_on_seek();
     puts("apple2 core tests passed");
     return 0;
 }
