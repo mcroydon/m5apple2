@@ -778,6 +778,7 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
     uint32_t accum;
     uint32_t *nibble_pos;
     uint16_t track_length;
+    unsigned advances = 0;
 
     if (disk2 == NULL || cycles == 0U || cpu_hz == 0U || !disk2->motor_on) {
         return;
@@ -798,12 +799,15 @@ void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles)
         return;
     }
     track_length = disk2->track_cache_length;
-    *stream_accum -= cpu_hz;
-
     nibble_pos = &disk2->nibble_pos[drive];
-    (*nibble_pos)++;
-    if (*nibble_pos == track_length) {
-        *nibble_pos = 0U;
+
+    while (*stream_accum >= cpu_hz && advances < 8U) {
+        *stream_accum -= cpu_hz;
+        (*nibble_pos)++;
+        if (*nibble_pos >= track_length) {
+            *nibble_pos = 0U;
+        }
+        advances++;
     }
     disk2_latch_prepared_byte(disk2);
 }

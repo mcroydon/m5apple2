@@ -944,6 +944,33 @@ static void test_decimal_sbc_flags(void)
     }
 }
 
+static void test_disk2_tick_multi_advance(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_NIB_IMAGE_SIZE];
+    const uint32_t cpu_hz = 1020484U;
+
+    /* Fill NIB image with sequential pattern so we can detect position. */
+    for (size_t i = 0; i < sizeof(image); ++i) {
+        image[i] = (uint8_t)(0x80U | (i & 0x7FU));
+    }
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_nib_drive(&disk2, 0, image, sizeof(image)));
+
+    /* Turn motor on and prepare track. */
+    (void)apple2_disk2_access(&disk2, 0x9U); /* Motor on. */
+    assert(disk2.motor_on);
+
+    /* Feed a large cycle count that should advance more than 1 byte.
+       At 33280 bytes/sec and 1020484 Hz, one byte = ~30.6 cycles.
+       Feed 200 cycles -> should advance ~6 bytes. */
+    const uint32_t initial_pos = disk2.nibble_pos[0];
+    apple2_disk2_tick(&disk2, cpu_hz, 200U);
+    const uint32_t after_pos = disk2.nibble_pos[0];
+    assert(after_pos - initial_pos >= 5U);
+    assert(after_pos - initial_pos <= 8U);
+}
+
 int main(void)
 {
     test_cpu_program();
@@ -970,6 +997,7 @@ int main(void)
     test_disk2_sector_tracks_keep_dos_interleave();
     test_game_io_stubs();
     test_decimal_sbc_flags();
+    test_disk2_tick_multi_advance();
     puts("apple2 core tests passed");
     return 0;
 }
