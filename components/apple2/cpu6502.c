@@ -264,6 +264,8 @@ static void cpu_sbc(cpu6502_t *cpu, uint8_t value)
 
     cpu_set_flag(cpu, CPU6502_FLAG_OVERFLOW,
                  ((a ^ value) & (uint8_t)(a ^ diff) & 0x80U) != 0U);
+    cpu_set_flag(cpu, CPU6502_FLAG_CARRY, diff < 0x100U);
+    cpu_set_nz(cpu, (uint8_t)diff);
 
     if (cpu_flag(cpu, CPU6502_FLAG_DECIMAL)) {
         int16_t lo = (int16_t)(a & 0x0FU) - (int16_t)(value & 0x0FU) - (int16_t)(1U - carry);
@@ -279,9 +281,6 @@ static void cpu_sbc(cpu6502_t *cpu, uint8_t value)
     } else {
         cpu->a = (uint8_t)diff;
     }
-
-    cpu_set_flag(cpu, CPU6502_FLAG_CARRY, diff < 0x100U);
-    cpu_set_nz(cpu, cpu->a);
 }
 
 static uint8_t cpu_asl(cpu6502_t *cpu, uint8_t value)

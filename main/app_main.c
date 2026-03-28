@@ -20,6 +20,15 @@
 #include "cardputer/cardputer_display.h"
 #include "cardputer/cardputer_keyboard.h"
 
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+#include "cardputer/cardputer_audio.h"
+
+static void app_speaker_toggle(void *context, uint64_t total_cycles)
+{
+    cardputer_audio_toggle((cardputer_audio_t *)context, total_cycles);
+}
+#endif
+
 #ifndef CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS
 #define CONFIG_M5APPLE2_PERF_LOG_INTERVAL_MS 2000
 #endif
@@ -64,6 +73,11 @@ static bool app_sd_read_sector(void *context,
                                uint8_t track,
                                uint8_t file_sector,
                                uint8_t *sector_data);
+static bool app_sd_write_sector(void *context,
+                                unsigned drive_index,
+                                uint8_t track,
+                                uint8_t file_sector,
+                                const uint8_t *sector_data);
 
 #define APP_BOOT_TRACE_INTERVAL_US 200000LL
 #define APP_BOOT_TRACE_DURATION_US 8000000LL
@@ -269,6 +283,7 @@ typedef enum {
 
 static app_speed_mode_t s_speed_mode = APP_SPEED_MODE_1X;
 
+static void app_flush_dirty_tracks(void);
 static bool app_restore_builtin_drive(unsigned drive_index);
 static void app_sd_close_drive(unsigned drive_index);
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index);
@@ -1204,6 +1219,8 @@ static bool app_sd_picker_apply_selection(void)
     const app_sd_picker_item_t item =
         app_sd_picker_item_for_index(drive, (size_t)s_sd_picker.selected_item);
 
+    app_flush_dirty_tracks();
+
     switch (item.kind) {
     case APP_SD_PICKER_ITEM_BUILTIN:
         app_sd_close_drive(drive);
@@ -1829,6 +1846,50 @@ static bool app_sd_read_sector(void *context,
     return true;
 }
 
+static bool app_sd_write_sector(void *context,
+                                unsigned drive_index,
+                                uint8_t track,
+                                uint8_t file_sector,
+                                const uint8_t *sector_data)
+{
+    const int disk_index =
+        (drive_index < 2U) ? s_sd_drive_index[drive_index] : -1;
+    const char *path;
+    FILE *file;
+    long offset;
+
+    (void)context;
+    if (disk_index < 0 || (size_t)disk_index >= s_sd_disk_count) {
+        ESP_LOGW(TAG, "SD write: no disk mapped for drive %u", drive_index + 1U);
+        return false;
+    }
+    if (track >= 35U || file_sector >= 16U) {
+        ESP_LOGW(TAG, "SD write: out of range track=%u sector=%u", track, file_sector);
+        return false;
+    }
+
+    path = s_sd_disks[disk_index].path;
+    offset = (long)(((size_t)track * 16U + file_sector) * 256U);
+
+    file = fopen(path, "r+b");
+    if (file == NULL) {
+        ESP_LOGW(TAG, "SD write: failed to open %s", path);
+        return false;
+    }
+    if (fseek(file, offset, SEEK_SET) != 0) {
+        ESP_LOGW(TAG, "SD write: seek failed offset=%ld %s", offset, path);
+        fclose(file);
+        return false;
+    }
+    if (fwrite(sector_data, 1, 256U, file) != 256U) {
+        ESP_LOGW(TAG, "SD write: write failed offset=%ld %s", offset, path);
+        fclose(file);
+        return false;
+    }
+    fclose(file);
+    return true;
+}
+
 static bool app_sd_read_track(void *context,
                               unsigned drive_index,
                               uint8_t quarter_track,
@@ -1910,6 +1971,13 @@ static bool app_sd_file_valid(FILE *file, app_disk_image_type_t type, apple2_woz
     case APP_DISK_IMAGE_NONE:
     default:
         return false;
+    }
+}
+
+static void app_flush_dirty_tracks(void)
+{
+    if (!apple2_disk2_flush(&s_machine.disk2)) {
+        ESP_LOGW(TAG, "disk flush failed");
     }
 }
 
@@ -2300,6 +2368,19 @@ static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index)
     }
 
     s_sd_drive_index[drive_index] = (int)disk_index;
+
+    switch (disk->type) {
+    case APP_DISK_IMAGE_PO:
+    case APP_DISK_IMAGE_DSK:
+    case APP_DISK_IMAGE_DO:
+        apple2_disk2_attach_drive_writer(&s_machine.disk2, drive_index,
+                                          app_sd_write_sector,
+                                          &s_sd_drive_files[drive_index]);
+        break;
+    default:
+        break;
+    }
+
     s_perf.sd_mount_us += (uint64_t)(esp_timer_get_time() - mount_start_us);
     s_perf.sd_mounts++;
     switch (disk->type) {
@@ -2395,6 +2476,8 @@ static void app_sd_cycle_drive(unsigned drive_index)
         ESP_LOGW(TAG, "No SD disk library available for drive %u", (unsigned)(drive_index + 1U));
         return;
     }
+
+    app_flush_dirty_tracks();
 
     next_index = s_sd_drive_index[drive_index];
     if (++next_index >= (int)s_sd_disk_count) {
@@ -2717,6 +2800,7 @@ void app_main(void)
     bool rom_loaded = false;
     bool slot6_loaded = false;
     bool drive0_loaded = false;
+    bool prev_motor_on = false;
     int64_t last_cpu_tick_us;
     int64_t last_frame_tick_us;
     uint64_t cpu_cycle_credit = 0U;
@@ -2727,6 +2811,14 @@ void app_main(void)
     ESP_ERROR_CHECK(cardputer_keyboard_init());
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
              s_display.native_width, s_display.native_height);
+
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+    cardputer_audio_t *audio = cardputer_audio_init();
+    if (audio != NULL) {
+        apple2_machine_set_speaker_callback(&s_machine, app_speaker_toggle, audio);
+        ESP_LOGI(TAG, "Audio output enabled");
+    }
+#endif
 
     rom_loaded = app_load_system_rom();
     slot6_loaded = app_load_slot6_rom();
@@ -2878,6 +2970,16 @@ void app_main(void)
                     step_slices++;
                 }
                 s_perf.cpu_step_us += (uint64_t)(esp_timer_get_time() - step_start_us);
+#if CONFIG_M5APPLE2_AUDIO_ENABLED
+                if (audio != NULL) {
+                    cardputer_audio_flush(audio, s_machine.total_cycles,
+                                          apple2_config.cpu_hz * app_speed_multiplier());
+                }
+#endif
+                if (prev_motor_on && !s_machine.disk2.motor_on) {
+                    app_flush_dirty_tracks();
+                }
+                prev_motor_on = s_machine.disk2.motor_on;
             }
         }
         last_cpu_tick_us = now_us;

@@ -35,6 +35,12 @@ typedef bool (*apple2_disk2_read_track_fn)(void *context,
                                            uint8_t *track_data,
                                            uint16_t *track_length);
 
+typedef bool (*apple2_disk2_write_sector_fn)(void *context,
+                                              unsigned drive_index,
+                                              uint8_t track,
+                                              uint8_t file_sector,
+                                              const uint8_t *sector_data);
+
 typedef struct {
     uint32_t offset;
     uint16_t byte_count;
@@ -57,11 +63,15 @@ typedef struct {
     void *read_sector_context[2];
     apple2_disk2_read_track_fn read_track[2];
     void *read_track_context[2];
+    apple2_disk2_write_sector_fn write_sector[2];
+    void *write_sector_context[2];
     bool motor_on;
     bool data_ready;
     uint8_t active_drive;
     bool q6;
     bool q7;
+    bool write_mode;
+    bool track_cache_dirty;
     uint8_t phase_mask[2];
     int8_t stepper_state[2];
     uint8_t quarter_track[2];
@@ -107,5 +117,10 @@ bool apple2_disk2_attach_drive_track_reader(apple2_disk2_t *disk2,
                                             void *context);
 void apple2_disk2_unload_drive(apple2_disk2_t *disk2, unsigned drive_index);
 bool apple2_disk2_drive_loaded(const apple2_disk2_t *disk2, unsigned drive_index);
+void apple2_disk2_attach_drive_writer(apple2_disk2_t *disk2,
+                                       unsigned drive_index,
+                                       apple2_disk2_write_sector_fn write_sector,
+                                       void *context);
+bool apple2_disk2_flush(apple2_disk2_t *disk2);
 void apple2_disk2_tick(apple2_disk2_t *disk2, uint32_t cpu_hz, uint32_t cycles);
 uint8_t apple2_disk2_access(apple2_disk2_t *disk2, uint8_t reg);

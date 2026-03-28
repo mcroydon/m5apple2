@@ -736,6 +736,59 @@ static void test_disk2_redundant_switches_do_not_reset_state(void)
     assert(disk2.data_latch == 0xAAU);
 }
 
+static void test_keyboard_latch_aliasing(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+    apple2_machine_set_key(&machine, 'B');
+    assert(machine.key_latch == 0xC2U);
+
+    /* All addresses $C000-$C00F should return the key latch. */
+    for (uint16_t addr = 0xC000U; addr <= 0xC00FU; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_set_key(&machine, 'B');
+        apple2_machine_step_instruction(&machine);
+        assert(apple2_machine_cpu_state(&machine).a == 0xC2U);
+    }
+}
+
+static void test_keyboard_strobe_aliasing(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    /* Reading any address $C010-$C01F should clear the strobe. */
+    for (uint16_t addr = 0xC010U; addr <= 0xC01FU; ++addr) {
+        apple2_machine_set_key(&machine, 'X');
+        assert((machine.key_latch & 0x80U) != 0U);
+
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_set_key(&machine, 'X');
+        apple2_machine_step_instruction(&machine);
+        assert((machine.key_latch & 0x80U) == 0U);
+    }
+
+    /* Writing to $C010-$C01F should also clear the strobe. */
+    apple2_machine_set_key(&machine, 'Z');
+    assert((machine.key_latch & 0x80U) != 0U);
+    apple2_machine_poke(&machine, 0xC015, 0x00);
+    assert((machine.key_latch & 0x80U) == 0U);
+}
+
 static void test_disk2_sector_tracks_keep_dos_interleave(void)
 {
     static const uint8_t s_expected_track1_order[16] = {
@@ -762,12 +815,290 @@ static void test_disk2_sector_tracks_keep_dos_interleave(void)
     assert(memcmp(sectors, s_expected_track1_order, sizeof(sectors)) == 0);
 }
 
+static void test_game_io_stubs(void)
+{
+    apple2_machine_t machine;
+
+    apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+
+    /* Push buttons $C061-$C063 should return $00 (not pressed). */
+    for (uint16_t addr = 0xC061U; addr <= 0xC063U; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_step_instruction(&machine);
+        assert((apple2_machine_cpu_state(&machine).a & 0x80U) == 0x00U);
+    }
+
+    /* Paddle timers $C064-$C067 should return $00 (timer expired). */
+    for (uint16_t addr = 0xC064U; addr <= 0xC067U; ++addr) {
+        const uint8_t program[] = {
+            0xAD, (uint8_t)(addr & 0xFFU), (uint8_t)(addr >> 8), /* LDA addr */
+            0xEA,                                                  /* NOP */
+        };
+        memcpy(&machine.memory[0x0200], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0200);
+        apple2_machine_reset(&machine);
+        apple2_machine_step_instruction(&machine);
+        assert((apple2_machine_cpu_state(&machine).a & 0x80U) == 0x00U);
+    }
+}
+
+static void test_decimal_sbc_flags(void)
+{
+    apple2_machine_t machine;
+
+    /* Test 1: $50 - $30 = $20 in BCD.
+       Binary: $50 - $30 - (1 - carry=1) = $20.
+       N flag from binary result: 0 (bit 7 of $20 = 0).
+       Z flag from binary result: 0 ($20 != 0). */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x50, /* LDA #$50 */
+            0xE9, 0x30, /* SBC #$30 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x20U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) == 0U);  /* Binary $20: not negative. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) == 0U);       /* Binary $20: not zero. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) != 0U);      /* No borrow. */
+    }
+
+    /* Test 2: $32 - $32 = $00 in BCD.
+       Binary: $32 - $32 = $00.
+       Z flag from binary result: 1 ($00 == 0).
+       N flag from binary result: 0. */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x32, /* LDA #$32 */
+            0xE9, 0x32, /* SBC #$32 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x00U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) != 0U);       /* Binary $00: zero. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) == 0U);    /* Binary $00: not negative. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) != 0U);       /* No borrow. */
+    }
+
+    /* Test 3: $10 - $20 = $90 in BCD (borrow).
+       Binary: $10 - $20 = $F0 (wraps).
+       N flag from binary result: 1 (bit 7 of $F0 = 1).
+       Z flag from binary result: 0 ($F0 != 0).
+       Carry: 0 (borrow occurred). */
+    {
+        const uint8_t program[] = {
+            0xF8,       /* SED */
+            0x38,       /* SEC */
+            0xA9, 0x10, /* LDA #$10 */
+            0xE9, 0x20, /* SBC #$20 */
+            0xD8,       /* CLD */
+            0xEA,       /* NOP */
+        };
+
+        apple2_machine_init(&machine, &(apple2_config_t){ .cpu_hz = 1020484U });
+        memcpy(&machine.memory[0x0300], program, sizeof(program));
+        fill_reset_vector(&machine, 0x0300);
+        apple2_machine_reset(&machine);
+
+        for (int i = 0; i < 6; ++i) {
+            apple2_machine_step_instruction(&machine);
+        }
+
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        assert(cpu.a == 0x90U);  /* BCD result. */
+        assert((cpu.p & CPU6502_FLAG_NEGATIVE) != 0U);  /* Binary $F0: negative. */
+        assert((cpu.p & CPU6502_FLAG_ZERO) == 0U);       /* Binary $F0: not zero. */
+        assert((cpu.p & CPU6502_FLAG_CARRY) == 0U);      /* Borrow occurred. */
+    }
+}
+
+static void test_disk2_write_mode(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_NIB_IMAGE_SIZE];
+
+    memset(image, 0x80, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_nib_drive(&disk2, 0, image, sizeof(image)));
+
+    /* Motor on. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.motor_on);
+    assert(!disk2.q6);
+    assert(!disk2.q7);
+
+    /* Enter write mode: Q6=1 (reg D), Q7=1 (reg F). */
+    (void)apple2_disk2_access(&disk2, 0xDU); /* Q6 = true */
+    (void)apple2_disk2_access(&disk2, 0xFU); /* Q7 = true */
+    assert(disk2.q6);
+    assert(disk2.q7);
+    assert(disk2.write_mode);
+
+    /* Exit write mode: Q7=0 (reg E). */
+    (void)apple2_disk2_access(&disk2, 0xEU); /* Q7 = false */
+    assert(!disk2.write_mode);
+}
+
+/* Test helper: capture sectors written by flush. */
+typedef struct {
+    uint8_t sectors[16][256];
+    uint8_t track[16];
+    uint8_t file_sector[16];
+    unsigned count;
+} test_write_capture_t;
+
+static bool test_write_sector(void *context, unsigned drive_index, uint8_t track,
+                               uint8_t file_sector, const uint8_t *sector_data)
+{
+    test_write_capture_t *cap = context;
+    (void)drive_index;
+    if (cap->count < 16U) {
+        cap->track[cap->count] = track;
+        cap->file_sector[cap->count] = file_sector;
+        memcpy(cap->sectors[cap->count], sector_data, 256U);
+        cap->count++;
+    }
+    return true;
+}
+
+static void test_disk2_write_flush_roundtrip(void)
+{
+    /* Create a sector image with known data. */
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+    for (size_t i = 0; i < sizeof(image); ++i) {
+        image[i] = (uint8_t)(i & 0xFFU);
+    }
+
+    apple2_disk2_t disk2;
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_drive_with_order(&disk2, 0, image, sizeof(image),
+                                               APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL));
+
+    /* Build track 0 cache by turning motor on. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.track_cache_valid);
+
+    /* Attach write callback. */
+    test_write_capture_t capture;
+    memset(&capture, 0, sizeof(capture));
+    apple2_disk2_attach_drive_writer(&disk2, 0, test_write_sector, &capture);
+
+    /* Mark dirty and flush. */
+    disk2.track_cache_dirty = true;
+    assert(apple2_disk2_flush(&disk2));
+    assert(!disk2.track_cache_dirty);
+
+    /* Should have decoded all 16 sectors from track 0. */
+    assert(capture.count == 16U);
+
+    /* Verify the first sector's data matches the original image.
+       File sector 0 corresponds to the first 256 bytes of the image (track 0, sector 0). */
+    bool found_sector0 = false;
+    for (unsigned i = 0; i < capture.count; ++i) {
+        if (capture.track[i] == 0U && capture.file_sector[i] == 0U) {
+            assert(memcmp(capture.sectors[i], &image[0], 256U) == 0);
+            found_sector0 = true;
+            break;
+        }
+    }
+    assert(found_sector0);
+}
+
+static void test_disk2_tick_multi_advance(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_NIB_IMAGE_SIZE];
+    const uint32_t cpu_hz = 1020484U;
+
+    /* Fill NIB image with sequential pattern so we can detect position. */
+    for (size_t i = 0; i < sizeof(image); ++i) {
+        image[i] = (uint8_t)(0x80U | (i & 0x7FU));
+    }
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_nib_drive(&disk2, 0, image, sizeof(image)));
+
+    /* Turn motor on and prepare track. */
+    (void)apple2_disk2_access(&disk2, 0x9U); /* Motor on. */
+    assert(disk2.motor_on);
+
+    /* Feed a large cycle count that should advance more than 1 byte.
+       At 33280 bytes/sec and 1020484 Hz, one byte = ~30.6 cycles.
+       Feed 200 cycles -> should advance ~6 bytes. */
+    const uint32_t initial_pos = disk2.nibble_pos[0];
+    apple2_disk2_tick(&disk2, cpu_hz, 200U);
+    const uint32_t after_pos = disk2.nibble_pos[0];
+    assert(after_pos - initial_pos >= 5U);
+    assert(after_pos - initial_pos <= 8U);
+}
+
+static void test_disk2_eager_cache_on_seek(void)
+{
+    apple2_disk2_t disk2;
+    uint8_t image[APPLE2_DISK2_IMAGE_SIZE];
+
+    memset(image, 0x00, sizeof(image));
+    apple2_disk2_init(&disk2);
+    assert(apple2_disk2_load_drive_with_order(&disk2, 0, image, sizeof(image),
+                                               APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL));
+
+    /* Motor on, build initial track cache at track 0. */
+    (void)apple2_disk2_access(&disk2, 0x9U);
+    assert(disk2.track_cache_valid);
+    assert(disk2.quarter_track[0] == 0U);
+
+    /* Step to track 1 (quarter_track 4) using full stepper sequence:
+       phase 0 on, phase 1 on, phase 0 off, phase 2 on, phase 1 off. */
+    (void)apple2_disk2_access(&disk2, 0x1U); /* Phase 0 on. */
+    (void)apple2_disk2_access(&disk2, 0x3U); /* Phase 1 on. */
+    (void)apple2_disk2_access(&disk2, 0x0U); /* Phase 0 off. */
+    (void)apple2_disk2_access(&disk2, 0x5U); /* Phase 2 on. */
+    (void)apple2_disk2_access(&disk2, 0x2U); /* Phase 1 off. */
+    assert(disk2.quarter_track[0] == 4U);
+
+    /* Cache should already be valid for the new track (eager rebuild). */
+    assert(disk2.track_cache_valid);
+}
+
 int main(void)
 {
     test_cpu_program();
     test_decimal_adc();
     test_undocumented_nops();
     test_soft_switches();
+    test_keyboard_latch_aliasing();
+    test_keyboard_strobe_aliasing();
     test_video_addresses();
     test_text_render();
     test_text_code_mapping();
@@ -784,6 +1115,12 @@ int main(void)
     test_disk2_stepper_quarter_tracks();
     test_disk2_redundant_switches_do_not_reset_state();
     test_disk2_sector_tracks_keep_dos_interleave();
+    test_game_io_stubs();
+    test_decimal_sbc_flags();
+    test_disk2_tick_multi_advance();
+    test_disk2_write_mode();
+    test_disk2_write_flush_roundtrip();
+    test_disk2_eager_cache_on_seek();
     puts("apple2 core tests passed");
     return 0;
 }

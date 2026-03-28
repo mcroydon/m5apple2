@@ -356,14 +356,21 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
         return apple2_bus_value(machine, machine->memory[address]);
     }
 
-    switch (address) {
-    case 0xC000:
+    if (address >= 0xC000U && address <= 0xC00FU) {
         return apple2_bus_value(machine, machine->key_latch);
-    case 0xC010:
+    }
+    if (address >= 0xC010U && address <= 0xC01FU) {
         machine->key_latch &= 0x7FU;
         return apple2_bus_value(machine, machine->key_latch);
+    }
+
+    switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
+        if (machine->speaker_toggle_fn != NULL) {
+            machine->speaker_toggle_fn(machine->speaker_toggle_context,
+                                        machine->total_cycles);
+        }
         return apple2_bus_value(machine, machine->floating_bus);
     case 0xC050:
         machine->video.text_mode = false;
@@ -413,6 +420,15 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
     case 0xC05F:
         machine->annunciator_state |= 0x08U;
         return apple2_bus_value(machine, machine->floating_bus);
+    case 0xC061:
+    case 0xC062:
+    case 0xC063:
+        return apple2_bus_value(machine, 0x00U); /* Push buttons: not pressed. */
+    case 0xC064:
+    case 0xC065:
+    case 0xC066:
+    case 0xC067:
+        return apple2_bus_value(machine, 0x00U); /* Paddle timers: expired. */
     default:
         break;
     }
@@ -452,12 +468,21 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
         return;
     }
 
-    switch (address) {
-    case 0xC010:
+    if (address >= 0xC000U && address <= 0xC00FU) {
+        return;
+    }
+    if (address >= 0xC010U && address <= 0xC01FU) {
         machine->key_latch &= 0x7FU;
         return;
+    }
+
+    switch (address) {
     case 0xC030:
         machine->speaker_toggles++;
+        if (machine->speaker_toggle_fn != NULL) {
+            machine->speaker_toggle_fn(machine->speaker_toggle_context,
+                                        machine->total_cycles);
+        }
         return;
     case 0xC050:
         machine->video.text_mode = false;
@@ -517,6 +542,9 @@ static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
     }
 
     if (address >= 0xC0E0U && address <= 0xC0EFU) {
+        if ((address & 0x0FU) == 0x0DU && machine->disk2.q7) {
+            machine->disk2.data_latch = value;
+        }
         const uint8_t ignored = apple2_disk2_access(&machine->disk2, (uint8_t)(address & 0x0FU));
 
         apple2_disk_io_trace(machine, address, true, ignored);
@@ -714,6 +742,14 @@ bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *ima
 bool apple2_machine_load_drive1_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size)
 {
     return apple2_disk2_load_nib_drive(&machine->disk2, 1, image, image_size);
+}
+
+void apple2_machine_set_speaker_callback(apple2_machine_t *machine,
+                                          apple2_speaker_toggle_fn fn,
+                                          void *context)
+{
+    machine->speaker_toggle_fn = fn;
+    machine->speaker_toggle_context = context;
 }
 
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii)

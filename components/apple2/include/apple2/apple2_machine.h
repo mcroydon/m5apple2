@@ -15,6 +15,8 @@
 #define APPLE2_LANGCARD_RAM_SIZE 0x4000U
 #define APPLE2_LANGCARD_ROM_SIZE 0x3000U
 
+typedef void (*apple2_speaker_toggle_fn)(void *context, uint64_t total_cycles);
+
 typedef struct {
     uint32_t cpu_hz;
 } apple2_config_t;
@@ -54,6 +56,8 @@ typedef struct {
     bool motherboard_rom_loaded;
     bool system_rom_loaded;
     bool slot6_rom_loaded;
+    apple2_speaker_toggle_fn speaker_toggle_fn;
+    void *speaker_toggle_context;
 } apple2_machine_t;
 
 void apple2_machine_init(apple2_machine_t *machine, const apple2_config_t *config);
@@ -68,6 +72,9 @@ bool apple2_machine_load_drive1_dsk(apple2_machine_t *machine, const uint8_t *im
 bool apple2_machine_load_drive1_do(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive1_po(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
 bool apple2_machine_load_drive1_nib(apple2_machine_t *machine, const uint8_t *image, size_t image_size);
+void apple2_machine_set_speaker_callback(apple2_machine_t *machine,
+                                          apple2_speaker_toggle_fn fn,
+                                          void *context);
 void apple2_machine_set_key(apple2_machine_t *machine, uint8_t ascii);
 void apple2_machine_step(apple2_machine_t *machine, uint32_t cycles);
 uint32_t apple2_machine_step_instruction(apple2_machine_t *machine);
