@@ -7,13 +7,16 @@ It is aimed at practical, on-device use: provide your own ROMs and disk images,
 flash the firmware, mount a disk from the keyboard, and boot straight into DOS
 or an application on the built-in LCD.
 
-## Release 0.1 Status
+## Release 0.2 Status
 
 - Runs on both the original Cardputer and the Cardputer ADV
 - Boots user-supplied Apple II Plus ROMs and Disk II slot 6 software
 - Renders Apple II text, lo-res, and hi-res graphics on the built-in display
 - Supports keyboard input, SD card image browsing, drive switching, and reboot
   hotkeys on-device
+- Speaker audio output via I2S (ES8311 on original Cardputer, NS4168 on ADV)
+- Disk write support for SD-mounted sector images (`.do`, `.po`, `.dsk`), with
+  automatic flush on motor-off, eject, and drive swap
 - Known-good on hardware with DOS 3.3 and VisiCalc disk images
 - Includes host-side regression tests for CPU, video, disk parsing, keyboard
   mapping, and ROM boot smoke
@@ -246,34 +249,39 @@ sh tests/run_rom_smoke.sh
 
 The current host tests cover:
 
-- CPU core behavior
+- CPU core behavior (including BCD SBC flag correctness)
 - video helpers
 - `.nib` loading
 - `WOZ1` / `WOZ2` parsing
 - raw-track readers
+- keyboard soft switch aliasing (`$C000`–`$C01F`)
+- game I/O stubs (`$C061`–`$C067`)
+- disk nibble multi-advance timing
+- disk write mode tracking and GCR flush round-trip
+- eager track cache rebuild on seek
 - Cardputer keyboard translation
 - ROM boot smoke through DOS and prompt-side keyboard input
 
 ## Current Limitations
 
 - ROMs and disk images are user-supplied only
-- Disk II is still read-only
+- Disk writes are supported for sector images (`.do`, `.po`, `.dsk`) but not
+  for `.nib` or `.woz` images
 - `.woz` support currently uses `TMAP` and `TRKS` only
 - WOZ flux-level behavior and writeback are not implemented
 - Compatibility with commercial or nonstandard disks is still incomplete
 - Accelerated disk loading is still slower than ideal for large applications
-- Speaker/audio output is not implemented
-- Joystick, paddles, and other peripherals are not implemented
+- Joystick and paddles return stub values (buttons unpressed, timers expired)
+  but are not connected to physical input
 - SD browsing is root-only; there is no subdirectory browser yet
 
 ## High-Level Backlog
 
 - More performance work in the 6502 interpreter and hot bus paths
 - Better Disk II compatibility for commercial and unusual disks
-- Writable disk images and save persistence
+- Disk write support for `.nib` and `.woz` images
 - Fuller `WOZ` support, especially beyond `TMAP` / `TRKS`
-- Speaker/audio emulation
-- Additional Apple II peripherals such as joystick and paddles
+- Joystick and paddle input from physical controls
 - More SD-card UX polish
 - More compatibility soak testing on both Cardputer variants
 

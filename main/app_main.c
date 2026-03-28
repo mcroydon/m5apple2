@@ -283,6 +283,7 @@ typedef enum {
 
 static app_speed_mode_t s_speed_mode = APP_SPEED_MODE_1X;
 
+static void app_flush_dirty_tracks(void);
 static bool app_restore_builtin_drive(unsigned drive_index);
 static void app_sd_close_drive(unsigned drive_index);
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index);
