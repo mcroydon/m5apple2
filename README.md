@@ -14,7 +14,8 @@ or an application on the built-in LCD.
 - Renders Apple II text, lo-res, and hi-res graphics on the built-in display
 - Supports keyboard input, SD card image browsing, drive switching, and reboot
   hotkeys on-device
-- Speaker audio output via I2S (ES8311 on original Cardputer, NS4168 on ADV)
+- Speaker audio output via I2S (working on original Cardputer; ADV audio not yet
+  functional)
 - Disk write support for SD-mounted sector images (`.do`, `.po`, `.dsk`), with
   automatic flush on motor-off, eject, and drive swap
 - Known-good on hardware with DOS 3.3 and VisiCalc disk images
@@ -206,14 +207,18 @@ python "$IDF_PATH/tools/idf.py" -p PORT build flash monitor
 Build for the Cardputer ADV configuration:
 
 ```sh
-python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG=/tmp/m5apple2-adv.sdkconfig build
+python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" build
 ```
 
 Flash and monitor the ADV build:
 
 ```sh
-python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG=/tmp/m5apple2-adv.sdkconfig -p PORT build flash monitor
+python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" -p PORT build flash monitor
 ```
+
+The ADV build uses a separate build directory (`build-adv`) with its own generated
+`sdkconfig`. The `sdkconfig.defaults.adv` file layers the ADV variant selection on
+top of the shared defaults.
 
 `main/CMakeLists.txt` watches the `roms/` directory, so adding or removing ROM
 and embedded disk assets should trigger the necessary reconfigure work during a
