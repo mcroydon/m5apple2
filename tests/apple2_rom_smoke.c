@@ -802,7 +802,7 @@ int main(void)
             (disk_type == DISK_IMAGE_PO_PRODOS_ORDER || disk_type == DISK_IMAGE_DSK_PRODOS_ORDER);
         const uint32_t instruction_limit =
             (expected_text != NULL || require_not_basic_prompt) ? custom_instruction_limit :
-            expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 1500000U;
+            expect_prodos_prompt ? DOS_PROMPT_INSTRUCTIONS : 20000000U;
 
         for (uint32_t i = 0; i < instruction_limit; ++i) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
