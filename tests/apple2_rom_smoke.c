@@ -858,20 +858,34 @@ int main(void)
         if (expected_text != NULL &&
             boot_command != NULL &&
             boot_command[0] != '\0' &&
-            disk_screen_has_basic_prompt(&machine)) {
-            if (!boot_command_started) {
-                boot_command_started = true;
-            }
+            !boot_command_finished) {
+            /* Inject boot command when the CPU is polling the keyboard
+               (LDA $C000 = AD 00 C0) or when a BASIC prompt is visible.
+               This handles both DOS prompts and custom loaders that
+               wait for a keypress without showing a ] prompt. */
+            const bool at_keyboard_poll =
+                entered_loaded_binary &&
+                (machine.key_latch & 0x80U) == 0U &&
+                machine.memory[cpu.pc] == 0xADU &&
+                machine.memory[(uint16_t)(cpu.pc + 1U)] == 0x00U &&
+                machine.memory[(uint16_t)(cpu.pc + 2U)] == 0xC0U;
+            const bool at_basic_prompt = disk_screen_has_basic_prompt(&machine);
 
-            if (!boot_command_finished && (machine.key_latch & 0x80U) == 0U) {
-                const char next = boot_command[boot_command_pos];
+            if (at_keyboard_poll || at_basic_prompt) {
+                if (!boot_command_started) {
+                    boot_command_started = true;
+                }
 
-                if (next != '\0') {
-                    apple2_machine_set_key(&machine, (uint8_t)next);
-                    boot_command_pos++;
-                } else {
-                    apple2_machine_set_key(&machine, '\r');
-                    boot_command_finished = true;
+                if ((machine.key_latch & 0x80U) == 0U) {
+                    const char next = boot_command[boot_command_pos];
+
+                    if (next != '\0') {
+                        apple2_machine_set_key(&machine, (uint8_t)next);
+                        boot_command_pos++;
+                    } else {
+                        apple2_machine_set_key(&machine, '\r');
+                        boot_command_finished = true;
+                    }
                 }
             }
         }
