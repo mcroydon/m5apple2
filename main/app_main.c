@@ -266,6 +266,8 @@ typedef struct {
     apple2_video_state_t saved_video;
     uint8_t saved_text_pages[APP_TEXT_SCREEN_BYTES];
     char status[APP_TEXT_COLUMNS + 1U];
+    char browse_path[APP_SD_PATH_MAX];
+    uint8_t path_depth;
 } app_sd_picker_t;
 
 static app_sd_picker_t s_sd_picker;
@@ -1089,7 +1091,8 @@ static void app_sd_picker_format_item(unsigned drive_index,
         if (item.sd_index >= 0 && (size_t)item.sd_index < s_sd_disk_count) {
             snprintf(buffer,
                      buffer_size,
-                     "%s",
+                     "%s%s",
+                     s_sd_disks[item.sd_index].is_directory ? "/" : "",
                      s_sd_disks[item.sd_index].name);
         } else {
             snprintf(buffer, buffer_size, "INVALID SD ENTRY");
@@ -1147,7 +1150,9 @@ static void app_sd_picker_render(void)
     snprintf(line, sizeof(line), "SD DISK PICKER DRIVE %u", drive + 1U);
     app_puts_at(0, 0, line);
     app_puts_at(1, 0, "I/K MOVE  ENTER SELECT");
-    app_puts_at(2, 0, "ESC CANCEL  FN+0 RESCAN");
+    app_puts_at(2, 0, s_sd_picker.path_depth > 0U
+                      ? "ESC BACK  FN+0 RESCAN"
+                      : "ESC CANCEL  FN+0 RESCAN");
     app_puts_at(3, 0, "FN+3/4 ORDER  FN+5/6 DRIVE");
 
     if (s_sd_drive_index[drive] >= 0 && (size_t)s_sd_drive_index[drive] < s_sd_disk_count) {
@@ -1265,6 +1270,9 @@ static void app_sd_picker_open(unsigned drive_index)
     s_sd_picker.drive_index = (uint8_t)drive_index;
     s_sd_picker.selected_item = app_sd_picker_selection_for_current_drive(drive_index);
     s_sd_picker.scroll_item = 0;
+    snprintf(s_sd_picker.browse_path, sizeof(s_sd_picker.browse_path),
+             "%s", APP_SD_MOUNT_POINT);
+    s_sd_picker.path_depth = 0;
     app_sd_picker_set_status(NULL);
     app_sd_picker_sync_scroll();
     app_sd_picker_render();
@@ -1288,15 +1296,62 @@ static void app_sd_picker_handle_input(uint8_t ascii)
 {
     switch (ascii) {
     case 0x1BU:
+        if (s_sd_picker.path_depth > 0U) {
+            char *last_slash = strrchr(s_sd_picker.browse_path, '/');
+            if (last_slash != NULL && last_slash != s_sd_picker.browse_path) {
+                *last_slash = '\0';
+            }
+            s_sd_picker.path_depth--;
+            app_sd_scan_directory(s_sd_picker.browse_path);
+            s_sd_picker.selected_item = 0;
+            s_sd_picker.scroll_item = 0;
+            app_sd_picker_set_status(NULL);
+            app_sd_picker_sync_scroll();
+            app_sd_picker_render();
+            return;
+        }
         app_sd_picker_close();
         return;
-    case '\r':
+    case '\r': {
+        const unsigned sel_drive = (unsigned)s_sd_picker.drive_index;
+        const app_sd_picker_item_t sel_item =
+            app_sd_picker_item_for_index(sel_drive,
+                                         (size_t)s_sd_picker.selected_item);
+
+        if (sel_item.kind == APP_SD_PICKER_ITEM_SD &&
+            sel_item.sd_index >= 0 &&
+            (size_t)sel_item.sd_index < s_sd_disk_count &&
+            s_sd_disks[sel_item.sd_index].is_directory) {
+            if (s_sd_picker.path_depth >= 4U) {
+                app_sd_picker_set_status("DEPTH LIMIT");
+                app_sd_picker_render();
+                return;
+            }
+            {
+                char new_path[APP_SD_PATH_MAX];
+                snprintf(new_path, sizeof(new_path), "%s/%s",
+                         s_sd_picker.browse_path,
+                         s_sd_disks[sel_item.sd_index].name);
+                memcpy(s_sd_picker.browse_path, new_path,
+                       sizeof(s_sd_picker.browse_path));
+            }
+            s_sd_picker.path_depth++;
+            app_sd_scan_directory(s_sd_picker.browse_path);
+            s_sd_picker.selected_item = 0;
+            s_sd_picker.scroll_item = 0;
+            app_sd_picker_set_status(NULL);
+            app_sd_picker_sync_scroll();
+            app_sd_picker_render();
+            return;
+        }
+
         if (app_sd_picker_apply_selection()) {
             app_sd_picker_close();
         } else {
             app_sd_picker_render();
         }
         return;
+    }
     case 'i':
     case 'I':
     case 0x0BU:
@@ -1308,6 +1363,9 @@ static void app_sd_picker_handle_input(uint8_t ascii)
         s_sd_picker.selected_item++;
         break;
     case CARDPUTER_INPUT_CMD_SD_RESCAN:
+        snprintf(s_sd_picker.browse_path, sizeof(s_sd_picker.browse_path),
+                 "%s", APP_SD_MOUNT_POINT);
+        s_sd_picker.path_depth = 0;
         app_sd_rescan();
         s_sd_picker.selected_item = app_sd_picker_selection_for_current_drive(s_sd_picker.drive_index);
         s_sd_picker.scroll_item = 0;
