@@ -1024,6 +1024,23 @@ int main(void)
         puts("apple2 ROM+disk custom smoke passed");
         return 0;
     }
+    /* ProDOS images don't follow the DOS 3.3 boot pattern.
+       Accept if the CPU left the boot ROM and reached app code. */
+    if (disk_size != 0U &&
+        (disk_type == DISK_IMAGE_PO_PRODOS_ORDER) &&
+        expected_text == NULL &&
+        !require_not_basic_prompt) {
+        if (entered_loaded_binary) {
+            puts("apple2 ROM+disk ProDOS boot smoke passed");
+            return 0;
+        }
+        const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
+        fprintf(stderr,
+                "ProDOS boot did not reach app code, pc=%04x qt=%u entered_boot1=%u\n",
+                cpu.pc, machine.disk2.quarter_track[0], entered_boot1 ? 1U : 0U);
+        return 12;
+    }
+
     if (disk_size != 0U && !stage1_preloaded) {
         const apple2_cpu_state_t cpu = apple2_machine_cpu_state(&machine);
         fprintf(stderr,
