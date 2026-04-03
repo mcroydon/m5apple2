@@ -42,30 +42,7 @@ static apple2_machine_t *s_probe_machine;
 static cardputer_display_t s_display;
 static uint8_t s_apple2_pixels[APPLE2_VIDEO_WIDTH * APPLE2_VIDEO_HEIGHT];
 static spi_host_device_t app_sd_spi_host(void);
-typedef struct {
-    int64_t window_start_us;
-    uint64_t emulated_cycles;
-    uint64_t cpu_step_us;
-    uint64_t cpu_step_disk_us;
-    uint64_t cpu_step_idle_us;
-    uint64_t frame_compose_us;
-    uint64_t frame_present_us;
-    uint64_t dsk_probe_us;
-    uint64_t sd_mount_us;
-    uint32_t frames_presented;
-    uint32_t text_frames;
-    uint32_t text_frames_skipped;
-    uint32_t graphics_frames;
-    uint32_t dsk_probes;
-    uint32_t sd_mounts;
-    uint32_t disk_active_slices;
-    uint32_t idle_slices;
-    uint32_t drive_change_slices;
-    uint32_t quarter_track_change_slices;
-    uint32_t nibble_progress_slices;
-    uint64_t nibble_advance_bytes;
-    uint32_t nibble_wrap_slices;
-} app_perf_counters_t;
+#include "app_perf.h"
 
 static app_perf_counters_t s_perf;
 static bool app_sd_read_sector(void *context,
@@ -2795,12 +2772,6 @@ static bool app_load_drive0_image(void)
 #endif
 }
 
-static void app_perf_reset(int64_t now_us)
-{
-    memset(&s_perf, 0, sizeof(s_perf));
-    s_perf.window_start_us = now_us;
-}
-
 static void app_perf_log_if_due(int64_t now_us)
 {
     const int64_t elapsed_us = now_us - s_perf.window_start_us;
@@ -2809,66 +2780,7 @@ static void app_perf_log_if_due(int64_t now_us)
         return;
     }
 
-    {
-        const uint64_t effective_khz =
-            (elapsed_us > 0) ? (s_perf.emulated_cycles * 1000ULL) / (uint64_t)elapsed_us : 0ULL;
-        const uint32_t fps_x10 =
-            (elapsed_us > 0) ? (uint32_t)((uint64_t)s_perf.frames_presented * 10000000ULL / (uint64_t)elapsed_us)
-                             : 0U;
-        const uint32_t cpu_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t compose_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_compose_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-        const uint32_t present_pct =
-            (elapsed_us > 0) ? (uint32_t)(s_perf.frame_present_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-
-        ESP_LOGI(TAG,
-                 "perf apple=%" PRIu64 ".%03" PRIu64 "MHz mode=%s rate=%ux fps=%" PRIu32 ".%" PRIu32
-                 " cpu=%" PRIu32 "%% compose=%" PRIu32 "%% present=%" PRIu32
-                 "%% frames=%" PRIu32 " text=%" PRIu32 " skip=%" PRIu32 " gfx=%" PRIu32,
-                 effective_khz / 1000ULL,
-                 effective_khz % 1000ULL,
-                 app_speed_mode_name(),
-                 (unsigned)app_speed_multiplier(),
-                 fps_x10 / 10U,
-                 fps_x10 % 10U,
-                 cpu_pct,
-                 compose_pct,
-                 present_pct,
-                 s_perf.frames_presented,
-                 s_perf.text_frames,
-                 s_perf.text_frames_skipped,
-                 s_perf.graphics_frames);
-#if CONFIG_M5APPLE2_DETAILED_PERF_PROFILE
-        {
-            const uint32_t cpu_disk_pct =
-                (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_disk_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-            const uint32_t cpu_idle_pct =
-                (elapsed_us > 0) ? (uint32_t)(s_perf.cpu_step_idle_us * 100ULL / (uint64_t)elapsed_us) : 0U;
-
-        ESP_LOGI(TAG,
-                 "perf path disk_cpu=%" PRIu32 "%% idle_cpu=%" PRIu32 "%% act=%" PRIu32
-                 " idle=%" PRIu32 " drv=%" PRIu32 " qt=%" PRIu32 " nib=%" PRIu32
-                 " adv=%" PRIu64 " wrap=%" PRIu32
-                 " probe=%" PRIu32 "ms/%" PRIu32 " mount=%" PRIu32 "ms/%" PRIu32,
-                 cpu_disk_pct,
-                 cpu_idle_pct,
-                 s_perf.disk_active_slices,
-                 s_perf.idle_slices,
-                 s_perf.drive_change_slices,
-                 s_perf.quarter_track_change_slices,
-                 s_perf.nibble_progress_slices,
-                 s_perf.nibble_advance_bytes,
-                 s_perf.nibble_wrap_slices,
-                 (uint32_t)(s_perf.dsk_probe_us / 1000ULL),
-                 s_perf.dsk_probes,
-                 (uint32_t)(s_perf.sd_mount_us / 1000ULL),
-                 s_perf.sd_mounts);
-        }
-#endif
-    }
-
-    app_perf_reset(now_us);
+    app_perf_log(&s_perf, now_us, app_speed_mode_name(), (unsigned)app_speed_multiplier());
 }
 
 void app_main(void)
@@ -2918,7 +2830,7 @@ void app_main(void)
 
     last_cpu_tick_us = esp_timer_get_time();
     last_frame_tick_us = last_cpu_tick_us;
-    app_perf_reset(last_cpu_tick_us);
+    app_perf_reset(&s_perf, last_cpu_tick_us);
     app_text_cache_reset();
 
     while (true) {
