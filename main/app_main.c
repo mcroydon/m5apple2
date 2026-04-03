@@ -222,6 +222,7 @@ typedef struct {
     char path[APP_SD_PATH_MAX];
     char name[APP_SD_NAME_MAX];
     app_disk_image_type_t type;
+    bool is_directory;
 } app_sd_disk_entry_t;
 
 typedef struct {
@@ -2008,6 +2009,9 @@ static int app_sd_disk_compare(const void *lhs, const void *rhs)
     const app_sd_disk_entry_t *left = lhs;
     const app_sd_disk_entry_t *right = rhs;
 
+    if (left->is_directory != right->is_directory) {
+        return left->is_directory ? -1 : 1;
+    }
     return strcasecmp(left->name, right->name);
 }
 
@@ -2109,74 +2113,88 @@ static bool app_sd_mount_filesystem(void)
 #endif
 }
 
-static bool app_sd_scan_directory(void)
+static bool app_sd_scan_directory(const char *dir_path)
 {
     DIR *dir;
     struct dirent *entry;
 
     s_sd_disk_count = 0U;
-    dir = opendir(APP_SD_MOUNT_POINT);
+    dir = opendir(dir_path);
     if (dir == NULL) {
-        ESP_LOGW(TAG, "Could not open %s", APP_SD_MOUNT_POINT);
+        ESP_LOGW(TAG, "Could not open %s", dir_path);
         return false;
     }
 
     while ((entry = readdir(dir)) != NULL) {
         app_disk_image_type_t type;
         app_sd_disk_entry_t *disk;
-        FILE *candidate_file;
         char candidate_path[APP_SD_PATH_MAX];
         size_t name_len;
-        size_t path_len;
+        int path_len;
 
         if (entry->d_name[0] == '.') {
             continue;
         }
+
+        if (s_sd_disk_count >= APP_SD_MAX_IMAGES) {
+            ESP_LOGW(TAG, "Ignoring extra SD entries beyond %u", (unsigned)APP_SD_MAX_IMAGES);
+            break;
+        }
+
+        name_len = strnlen(entry->d_name, sizeof(((app_sd_disk_entry_t *)0)->path));
+        if (name_len == 0U || name_len >= sizeof(((app_sd_disk_entry_t *)0)->name)) {
+            ESP_LOGW(TAG, "Skipping SD entry name that is too long: %s", entry->d_name);
+            continue;
+        }
+
+        path_len = snprintf(candidate_path, sizeof(candidate_path),
+                            "%s/%s", dir_path, entry->d_name);
+        if (path_len < 0 || (size_t)path_len >= sizeof(candidate_path)) {
+            ESP_LOGW(TAG, "Skipping SD entry path that is too long: %s/%s",
+                     dir_path, entry->d_name);
+            continue;
+        }
+
+        if (entry->d_type == DT_DIR) {
+            disk = &s_sd_disks[s_sd_disk_count++];
+            memcpy(disk->path, candidate_path, (size_t)path_len + 1U);
+            memcpy(disk->name, entry->d_name, name_len);
+            disk->name[name_len] = '\0';
+            disk->type = APP_DISK_IMAGE_NONE;
+            disk->is_directory = true;
+            continue;
+        }
+
         type = app_disk_image_type_from_path(entry->d_name);
         if (type == APP_DISK_IMAGE_NONE) {
             continue;
         }
-        if (s_sd_disk_count >= APP_SD_MAX_IMAGES) {
-            ESP_LOGW(TAG, "Ignoring extra SD disks beyond %u entries", (unsigned)APP_SD_MAX_IMAGES);
-            break;
-        }
-        name_len = strnlen(entry->d_name, sizeof(disk->path));
-        if (name_len == 0U ||
-            name_len >= sizeof(disk->name) ||
-            (name_len + sizeof(APP_SD_MOUNT_POINT)) >= sizeof(disk->path)) {
-            ESP_LOGW(TAG, "Skipping SD disk name that is too long: %s", entry->d_name);
-            continue;
-        }
 
-        memcpy(candidate_path, APP_SD_MOUNT_POINT "/", sizeof(APP_SD_MOUNT_POINT));
-        memcpy(&candidate_path[sizeof(APP_SD_MOUNT_POINT)],
-               entry->d_name,
-               name_len);
-        candidate_path[sizeof(APP_SD_MOUNT_POINT) + name_len] = '\0';
-        path_len = sizeof(APP_SD_MOUNT_POINT) + name_len + 1U;
-
-        candidate_file = fopen(candidate_path, "rb");
-        if (candidate_file == NULL) {
-            ESP_LOGW(TAG, "Skipping unreadable SD disk candidate: %s", entry->d_name);
-            continue;
-        }
-        if (!app_sd_file_valid(candidate_file, type, NULL)) {
+        {
+            FILE *candidate_file = fopen(candidate_path, "rb");
+            if (candidate_file == NULL) {
+                ESP_LOGW(TAG, "Skipping unreadable SD disk candidate: %s", entry->d_name);
+                continue;
+            }
+            if (!app_sd_file_valid(candidate_file, type, NULL)) {
+                fclose(candidate_file);
+                ESP_LOGI(TAG, "Skipping unsupported SD disk candidate: %s", entry->d_name);
+                continue;
+            }
             fclose(candidate_file);
-            ESP_LOGI(TAG, "Skipping unsupported SD disk candidate: %s", entry->d_name);
-            continue;
         }
-        fclose(candidate_file);
 
         disk = &s_sd_disks[s_sd_disk_count++];
-        memcpy(disk->path, candidate_path, path_len);
+        memcpy(disk->path, candidate_path, (size_t)path_len + 1U);
         memcpy(disk->name, entry->d_name, name_len);
         disk->name[name_len] = '\0';
         disk->type = type;
+        disk->is_directory = false;
     }
 
     closedir(dir);
     qsort(s_sd_disks, s_sd_disk_count, sizeof(s_sd_disks[0]), app_sd_disk_compare);
-    ESP_LOGI(TAG, "Found %u SD disk image(s)", (unsigned)s_sd_disk_count);
+    ESP_LOGI(TAG, "Found %u SD entry(ies) in %s", (unsigned)s_sd_disk_count, dir_path);
     return true;
 }
 
@@ -2456,7 +2474,7 @@ static void app_sd_rescan(void)
     if (!app_sd_mount_filesystem()) {
         return;
     }
-    if (!app_sd_scan_directory()) {
+    if (!app_sd_scan_directory(APP_SD_MOUNT_POINT)) {
         return;
     }
     app_sd_restore_default_drives();
