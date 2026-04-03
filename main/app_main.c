@@ -290,6 +290,7 @@ static void app_flush_dirty_tracks(void);
 static bool app_restore_builtin_drive(unsigned drive_index);
 static void app_sd_close_drive(unsigned drive_index);
 static bool app_sd_mount_disk(unsigned drive_index, size_t disk_index);
+static bool app_sd_scan_directory(const char *dir_path);
 static void app_sd_rescan(void);
 static void app_sd_cycle_dsk_order(unsigned drive_index);
 static const char *app_sd_dsk_order_override_name(app_sd_dsk_order_override_t override);
@@ -1328,12 +1329,14 @@ static void app_sd_picker_handle_input(uint8_t ascii)
                 return;
             }
             {
-                char new_path[APP_SD_PATH_MAX];
-                snprintf(new_path, sizeof(new_path), "%s/%s",
-                         s_sd_picker.browse_path,
-                         s_sd_disks[sel_item.sd_index].name);
-                memcpy(s_sd_picker.browse_path, new_path,
-                       sizeof(s_sd_picker.browse_path));
+                size_t cur_len = strlen(s_sd_picker.browse_path);
+                size_t name_len = strlen(s_sd_disks[sel_item.sd_index].name);
+                if (cur_len + 1U + name_len + 1U > sizeof(s_sd_picker.browse_path)) {
+                    return;
+                }
+                s_sd_picker.browse_path[cur_len] = '/';
+                memcpy(&s_sd_picker.browse_path[cur_len + 1U],
+                       s_sd_disks[sel_item.sd_index].name, name_len + 1U);
             }
             s_sd_picker.path_depth++;
             app_sd_scan_directory(s_sd_picker.browse_path);
