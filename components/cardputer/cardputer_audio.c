@@ -187,8 +187,13 @@ cardputer_audio_t *cardputer_audio_init(void)
 
     i2s_std_config_t std_cfg = {
         .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(CONFIG_M5APPLE2_AUDIO_SAMPLE_RATE),
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
+                                                         I2S_SLOT_MODE_STEREO),
+#else
         .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT,
                                                          I2S_SLOT_MODE_MONO),
+#endif
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
             .bclk = (gpio_num_t)AUDIO_I2S_BCK_GPIO,
@@ -280,6 +285,39 @@ void cardputer_audio_flush(cardputer_audio_t *audio, uint64_t cpu_cycle, uint32_
         num_samples = CONFIG_M5APPLE2_AUDIO_BUFFER_SAMPLES;
     }
 
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    /* Stereo: duplicate each mono sample into L + R channels. */
+    int16_t sample_buf[CONFIG_M5APPLE2_AUDIO_BUFFER_SAMPLES * 2];
+
+    for (uint32_t i = 0; i < num_samples; ++i) {
+        const uint64_t sample_end_cycle = start_cycle + (uint64_t)(i + 1U) * cycles_per_sample;
+
+        /* Consume any toggle events that fall within this sample. */
+        while (audio->ring_tail != audio->ring_head) {
+            const uint64_t toggle_cycle = audio->toggle_ring[audio->ring_tail];
+
+            if (toggle_cycle > sample_end_cycle) {
+                break;
+            }
+
+            audio->output_level = (audio->output_level == AUDIO_LEVEL_HIGH)
+                                      ? AUDIO_LEVEL_LOW
+                                      : AUDIO_LEVEL_HIGH;
+            audio->ring_tail = (uint8_t)((audio->ring_tail + 1U) % AUDIO_TOGGLE_RING_SIZE);
+        }
+
+        sample_buf[i * 2]     = audio->output_level;
+        sample_buf[i * 2 + 1] = audio->output_level;
+    }
+
+    size_t bytes_written = 0;
+
+    i2s_channel_write(audio->i2s_handle,
+                      sample_buf,
+                      num_samples * 2U * sizeof(int16_t),
+                      &bytes_written,
+                      0);
+#else
     int16_t sample_buf[CONFIG_M5APPLE2_AUDIO_BUFFER_SAMPLES];
 
     for (uint32_t i = 0; i < num_samples; ++i) {
@@ -309,6 +347,7 @@ void cardputer_audio_flush(cardputer_audio_t *audio, uint64_t cpu_cycle, uint32_
                       num_samples * sizeof(int16_t),
                       &bytes_written,
                       0);
+#endif
 
     audio->last_flushed_cycle = start_cycle + (uint64_t)num_samples * cycles_per_sample;
 }
