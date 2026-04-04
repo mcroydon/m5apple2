@@ -115,6 +115,7 @@ static app_sd_flush_fn s_flush;
 static void *s_callback_ctx;
 
 static app_sd_perf_t s_perf;
+static uint8_t *s_shared_sector_cache;
 
 static const uint8_t s_prodos_track_order[16] = {
     0x0, 0x2, 0x4, 0x6, 0x8, 0xA, 0xC, 0xE,
@@ -732,11 +733,17 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
                  prodos_result.nibble_pos);
     }
 
+    /* Use progress rank only as a tiebreaker when scores are within 10%
+       of each other.  A clear score winner means that order executed more
+       boot code successfully, even if the other order moved the head. */
     {
         const int dos_rank = app_dsk_probe_result_progress_rank(&dos_result);
         const int prodos_rank = app_dsk_probe_result_progress_rank(&prodos_result);
+        const bool scores_close = app_dsk_probe_score_valid(dos_score) &&
+                                  app_dsk_probe_score_valid(prodos_score) &&
+                                  abs(dos_score - prodos_score) < (dos_score / 10 + 1);
 
-        if (dos_rank > prodos_rank) {
+        if (scores_close && dos_rank > prodos_rank) {
             ESP_LOGI(TAG,
                      "Probed .dsk order: dos=%d prodos=%d (DOS progress wins %d>%d)",
                      dos_score,
@@ -745,7 +752,7 @@ static app_disk_order_t app_probe_dsk_order_source(const app_disk_source_t *sour
                      prodos_rank);
             return APP_DISK_ORDER_DOS33;
         }
-        if (prodos_rank > dos_rank) {
+        if (scores_close && prodos_rank > dos_rank) {
             ESP_LOGI(TAG,
                      "Probed .dsk order: dos=%d prodos=%d (ProDOS progress wins %d>%d)",
                      dos_score,
@@ -853,7 +860,12 @@ static bool app_sd_load_sector_image(app_sd_drive_file_t *drive, unsigned drive_
         return false;
     }
     if (drive->image_data == NULL) {
-        drive->image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
+        /* Try the shared pre-allocated cache first, then fall back to malloc. */
+        if (s_shared_sector_cache != NULL) {
+            drive->image_data = s_shared_sector_cache;
+        } else {
+            drive->image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
+        }
         if (drive->image_data == NULL) {
             return false;
         }
@@ -1700,12 +1712,11 @@ app_sd_perf_t app_sd_perf_read(bool reset)
 
 void app_sd_pre_allocate_cache(void)
 {
-    if (s_sd_drive_files[0].image_data != NULL) {
+    if (s_shared_sector_cache != NULL) {
         return;
     }
-    s_sd_drive_files[0].image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
-    if (s_sd_drive_files[0].image_data != NULL) {
-        s_sd_drive_files[0].image_size = APPLE2_DISK2_IMAGE_SIZE;
+    s_shared_sector_cache = malloc(APPLE2_DISK2_IMAGE_SIZE);
+    if (s_shared_sector_cache != NULL) {
         ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache (free=%lu largest=%lu)",
                  (unsigned)APPLE2_DISK2_IMAGE_SIZE,
                  (unsigned long)esp_get_free_heap_size(),
