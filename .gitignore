@@ -12,3 +12,5 @@ tests/apple2_bench
 main/generated_assets/
 roms/*
 disks/*
+.cache/*
+.claude/*
