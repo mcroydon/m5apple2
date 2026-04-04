@@ -867,8 +867,14 @@ void app_main(void)
     apple2_machine_init(&s_machine, &apple2_config);
 
     /* Pre-allocate the sector image cache before display/keyboard init
-       fragment the heap with DMA buffers.  Pass it to app_sd_init later. */
+       fragment the heap with DMA buffers. */
+    ESP_LOGI(TAG, "Heap before cache alloc: free=%lu largest=%lu",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     app_sd_pre_allocate_cache();
+    ESP_LOGI(TAG, "Heap after cache alloc: free=%lu largest=%lu",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 
     ESP_ERROR_CHECK(cardputer_display_init(&s_display));
     ESP_ERROR_CHECK(cardputer_keyboard_init());
