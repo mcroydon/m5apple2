@@ -8,6 +8,7 @@
 #include "app_sd.h"
 
 #include <dirent.h>
+#include <sys/stat.h>
 #include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
@@ -1249,7 +1250,16 @@ bool app_sd_scan_directory(const char *dir_path)
             continue;
         }
 
-        if (entry->d_type == DT_DIR) {
+        {
+            bool is_dir = (entry->d_type == DT_DIR);
+
+            if (!is_dir && entry->d_type == DT_UNKNOWN) {
+                struct stat st;
+                if (stat(candidate_path, &st) == 0 && S_ISDIR(st.st_mode)) {
+                    is_dir = true;
+                }
+            }
+            if (is_dir) {
             disk = &s_sd_disks[s_sd_disk_count++];
             memcpy(disk->path, candidate_path, (size_t)path_len + 1U);
             memcpy(disk->name, entry->d_name, name_len);
@@ -1257,6 +1267,7 @@ bool app_sd_scan_directory(const char *dir_path)
             disk->type = APP_DISK_IMAGE_NONE;
             disk->is_directory = true;
             continue;
+            }
         }
 
         type = app_disk_image_type_from_path(entry->d_name);
