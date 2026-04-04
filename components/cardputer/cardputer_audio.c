@@ -156,11 +156,7 @@ cardputer_audio_t *cardputer_audio_init(void)
     audio->output_level = AUDIO_LEVEL_HIGH;
 
     /* Configure I2S standard mode: 16-bit mono. */
-#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_1, I2S_ROLE_MASTER);
-#else
     i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-#endif
     chan_cfg.dma_desc_num = 4;
     chan_cfg.dma_frame_num = CONFIG_M5APPLE2_AUDIO_BUFFER_SAMPLES;
 
