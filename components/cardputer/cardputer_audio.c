@@ -8,6 +8,7 @@
 #include "driver/i2s_std.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 
 #if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 #include "driver/i2c.h"
@@ -293,9 +294,14 @@ void cardputer_audio_flush(cardputer_audio_t *audio, uint64_t cpu_cycle, uint32_
                       sample_buf,
                       num_samples * sizeof(int16_t),
                       &bytes_written,
-                      0);
+                      pdMS_TO_TICKS(5));
 
-    audio->last_flushed_cycle = start_cycle + (uint64_t)num_samples * cycles_per_sample;
+    /* Advance only by the samples actually accepted by the DMA.
+       Unsent samples will be regenerated on the next flush. */
+    {
+        const uint32_t samples_written = (uint32_t)(bytes_written / sizeof(int16_t));
+        audio->last_flushed_cycle = start_cycle + (uint64_t)samples_written * cycles_per_sample;
+    }
 }
 
 void cardputer_audio_deinit(cardputer_audio_t *audio)
