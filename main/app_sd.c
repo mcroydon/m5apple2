@@ -920,14 +920,19 @@ static bool app_sd_read_sector(void *context,
 
     (void)drive_index;
     if (drive == NULL || drive->file == NULL || sector_data == NULL) {
+        ESP_LOGW(TAG, "read_sector: null ptr drive=%p file=%p data=%p",
+                 (void *)drive, drive ? (void *)drive->file : NULL, (void *)sector_data);
         return false;
     }
     if (track >= 35U || file_sector >= 16U) {
+        ESP_LOGW(TAG, "read_sector: out of range T%u S%u", track, file_sector);
         return false;
     }
     if (drive->sector_track_data == NULL) {
         drive->sector_track_data = malloc(APP_SD_TRACK_BYTES);
         if (drive->sector_track_data == NULL) {
+            ESP_LOGW(TAG, "read_sector: failed to alloc %u-byte track buffer",
+                     (unsigned)APP_SD_TRACK_BYTES);
             drive->sector_track_valid = false;
             return false;
         }
