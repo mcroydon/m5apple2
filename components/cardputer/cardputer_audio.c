@@ -104,9 +104,13 @@ static esp_err_t es8311_init(void)
         return err;
     }
 
-    /* Power on the codec. */
+    /* Probe the codec — if the first write NACKs, the ES8311 is not
+       present or not responding.  Bail out to avoid disrupting the
+       shared I2C bus (TCA8418 keyboard controller). */
     err = es8311_write_reg(ES8311_REG_RESET, 0x80U);
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ES8311 not responding at 0x%02X: %s",
+                 ES8311_I2C_ADDR, esp_err_to_name(err));
         return err;
     }
 
