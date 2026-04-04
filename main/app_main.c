@@ -871,6 +871,18 @@ void app_main(void)
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
              s_display.native_width, s_display.native_height);
 
+    rom_loaded = app_load_system_rom();
+    slot6_loaded = app_load_slot6_rom();
+    drive0_loaded = app_load_drive0_image();
+
+    /* SD init before audio: the .dsk probe machine (74 KB) and sector
+       image cache (143 KB) need large contiguous heap blocks.  I2S DMA
+       buffers fragment the heap, so do the big allocations first. */
+    app_sd_init(&s_machine,
+                app_sd_restore_builtin_callback,
+                app_sd_flush_callback,
+                &s_machine);
+
 #if CONFIG_M5APPLE2_AUDIO_ENABLED
     cardputer_audio_t *audio = cardputer_audio_init();
     if (audio != NULL) {
@@ -878,14 +890,6 @@ void app_main(void)
         ESP_LOGI(TAG, "Audio output enabled");
     }
 #endif
-
-    rom_loaded = app_load_system_rom();
-    slot6_loaded = app_load_slot6_rom();
-    drive0_loaded = app_load_drive0_image();
-    app_sd_init(&s_machine,
-                app_sd_restore_builtin_callback,
-                app_sd_flush_callback,
-                &s_machine);
     if (rom_loaded && !slot6_loaded) {
         ESP_LOGW(TAG, "System ROM loaded without a separate Disk II ROM");
     }
