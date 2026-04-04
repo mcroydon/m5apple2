@@ -1460,12 +1460,33 @@ void app_sd_restore_default_drives(apple2_machine_t *machine)
         return;
     }
 
-    if (s_has_builtin[0]) {
-        (void)app_sd_mount_disk(machine, 1U, 0U);
-    } else {
-        (void)app_sd_mount_disk(machine, 0U, 0U);
-        if (s_sd_disk_count > 1U) {
-            (void)app_sd_mount_disk(machine, 1U, 1U);
+    /* Find the first two non-directory entries for auto-mount. */
+    {
+        size_t first = SIZE_MAX;
+        size_t second = SIZE_MAX;
+
+        for (size_t i = 0; i < s_sd_disk_count && second == SIZE_MAX; ++i) {
+            if (s_sd_disks[i].is_directory) {
+                continue;
+            }
+            if (first == SIZE_MAX) {
+                first = i;
+            } else {
+                second = i;
+            }
+        }
+
+        if (first == SIZE_MAX) {
+            return;
+        }
+
+        if (s_has_builtin[0]) {
+            (void)app_sd_mount_disk(machine, 1U, first);
+        } else {
+            (void)app_sd_mount_disk(machine, 0U, first);
+            if (second != SIZE_MAX) {
+                (void)app_sd_mount_disk(machine, 1U, second);
+            }
         }
     }
 }
