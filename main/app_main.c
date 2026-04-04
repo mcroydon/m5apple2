@@ -871,7 +871,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
              s_display.native_width, s_display.native_height);
 
-#if CONFIG_M5APPLE2_AUDIO_ENABLED
+#if CONFIG_M5APPLE2_AUDIO_ENABLED && !CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    /* ADV audio (ES8311 codec) is not yet functional and the I2S DMA
+       buffers consume heap needed for the disk image cache.  Skip
+       audio init on ADV until the codec is working. */
     cardputer_audio_t *audio = cardputer_audio_init();
     if (audio != NULL) {
         apple2_machine_set_speaker_callback(&s_machine, app_speaker_toggle, audio);
@@ -1035,7 +1038,7 @@ void app_main(void)
                     step_slices++;
                 }
                 s_perf.cpu_step_us += (uint64_t)(esp_timer_get_time() - step_start_us);
-#if CONFIG_M5APPLE2_AUDIO_ENABLED
+#if CONFIG_M5APPLE2_AUDIO_ENABLED && !CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
                 if (audio != NULL) {
                     cardputer_audio_flush(audio, s_machine.total_cycles,
                                           apple2_config.cpu_hz * app_speed_multiplier());
