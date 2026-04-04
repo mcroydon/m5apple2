@@ -144,4 +144,11 @@ typedef struct {
 /** Read (and optionally reset) the SD performance counters. */
 app_sd_perf_t app_sd_perf_read(bool reset);
 
+/**
+ * Pre-allocate the sector image cache from heap.  Call this BEFORE
+ * display/keyboard init to get a contiguous 143 KB block before
+ * DMA buffers fragment the heap.
+ */
+void app_sd_pre_allocate_cache(void);
+
 #endif /* APP_SD_H */

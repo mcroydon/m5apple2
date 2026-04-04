@@ -866,6 +866,10 @@ void app_main(void)
 
     apple2_machine_init(&s_machine, &apple2_config);
 
+    /* Pre-allocate the sector image cache before display/keyboard init
+       fragment the heap with DMA buffers.  Pass it to app_sd_init later. */
+    app_sd_pre_allocate_cache();
+
     ESP_ERROR_CHECK(cardputer_display_init(&s_display));
     ESP_ERROR_CHECK(cardputer_keyboard_init());
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,

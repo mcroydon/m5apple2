@@ -1677,6 +1677,25 @@ app_sd_perf_t app_sd_perf_read(bool reset)
 
 /* ---- Init ---- */
 
+void app_sd_pre_allocate_cache(void)
+{
+    if (s_sd_drive_files[0].image_data != NULL) {
+        return;
+    }
+    s_sd_drive_files[0].image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
+    if (s_sd_drive_files[0].image_data != NULL) {
+        s_sd_drive_files[0].image_size = APPLE2_DISK2_IMAGE_SIZE;
+        ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache (free=%lu largest=%lu)",
+                 (unsigned)APPLE2_DISK2_IMAGE_SIZE,
+                 (unsigned long)esp_get_free_heap_size(),
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    } else {
+        ESP_LOGW(TAG, "Sector cache alloc failed (free=%lu largest=%lu)",
+                 (unsigned long)esp_get_free_heap_size(),
+                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    }
+}
+
 void app_sd_init(apple2_machine_t *machine,
                  app_sd_restore_builtin_fn restore_builtin,
                  app_sd_flush_fn flush,
@@ -1687,18 +1706,6 @@ void app_sd_init(apple2_machine_t *machine,
     s_callback_ctx = callback_ctx;
     s_probe_machine = machine;  /* borrow main machine for .dsk order probing */
 
-    /* Pre-allocate sector image cache for drive 1 before the heap gets
-       fragmented by SD/FAT and other subsystems.  Only one drive needs
-       the full 143 KB cache; drive 2 can use streamed reads or share
-       the cache if drive 1 is swapped out. */
-    if (s_sd_drive_files[0].image_data == NULL) {
-        s_sd_drive_files[0].image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
-        if (s_sd_drive_files[0].image_data != NULL) {
-            s_sd_drive_files[0].image_size = APPLE2_DISK2_IMAGE_SIZE;
-            ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache for drive 1",
-                     (unsigned)APPLE2_DISK2_IMAGE_SIZE);
-        }
-    }
 
     ESP_LOGI(TAG, "Free heap before SD init: %lu bytes (largest block: %lu)",
              (unsigned long)esp_get_free_heap_size(),
