@@ -857,8 +857,8 @@ static bool app_sd_load_sector_image(app_sd_drive_file_t *drive, unsigned drive_
         if (drive->image_data == NULL) {
             return false;
         }
-        drive->image_size = APPLE2_DISK2_IMAGE_SIZE;
     }
+    drive->image_size = APPLE2_DISK2_IMAGE_SIZE;
     if (!app_sd_read_file_with_retries(drive->file,
                                        0L,
                                        drive->image_data,
@@ -1294,8 +1294,8 @@ void app_sd_close_drive(apple2_machine_t *machine, unsigned drive_index)
     }
     s_sd_drive_files[drive_index].type = APP_DISK_IMAGE_NONE;
     s_sd_drive_files[drive_index].image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
-    free(s_sd_drive_files[drive_index].image_data);
-    s_sd_drive_files[drive_index].image_data = NULL;
+    /* Keep the pre-allocated image buffer for reuse — freeing it risks
+       heap fragmentation preventing re-allocation on the next mount. */
     s_sd_drive_files[drive_index].image_size = 0U;
     s_sd_drive_files[drive_index].sector_track_valid = false;
     free(s_sd_drive_files[drive_index].sector_track_data);
@@ -1686,6 +1686,19 @@ void app_sd_init(apple2_machine_t *machine,
     s_flush = flush;
     s_callback_ctx = callback_ctx;
     s_probe_machine = machine;  /* borrow main machine for .dsk order probing */
+
+    /* Pre-allocate sector image cache for drive 1 before the heap gets
+       fragmented by SD/FAT and other subsystems.  Only one drive needs
+       the full 143 KB cache; drive 2 can use streamed reads or share
+       the cache if drive 1 is swapped out. */
+    if (s_sd_drive_files[0].image_data == NULL) {
+        s_sd_drive_files[0].image_data = malloc(APPLE2_DISK2_IMAGE_SIZE);
+        if (s_sd_drive_files[0].image_data != NULL) {
+            s_sd_drive_files[0].image_size = APPLE2_DISK2_IMAGE_SIZE;
+            ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache for drive 1",
+                     (unsigned)APPLE2_DISK2_IMAGE_SIZE);
+        }
+    }
 
     ESP_LOGI(TAG, "Free heap before SD init: %lu bytes (largest block: %lu)",
              (unsigned long)esp_get_free_heap_size(),
