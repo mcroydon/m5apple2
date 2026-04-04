@@ -108,7 +108,7 @@ static app_sd_dsk_order_override_t s_sd_dsk_order_override[2];
 static bool s_sd_mounted;
 static bool s_has_builtin[2];
 
-static apple2_machine_t *s_probe_machine;
+static apple2_machine_t *s_probe_machine;  /* points to main machine during init */
 
 static app_sd_restore_builtin_fn s_restore_builtin;
 static app_sd_flush_fn s_flush;
@@ -532,7 +532,8 @@ static bool app_attach_probe_drive(apple2_machine_t *probe,
 
 static void app_release_probe_machine(void)
 {
-    free(s_probe_machine);
+    /* The probe machine is borrowed from the caller (s_machine) — don't free it.
+       Just clear the pointer so we don't use stale state. */
     s_probe_machine = NULL;
 }
 
@@ -545,14 +546,8 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
     bool entered_stage2 = false;
 
     if (s_probe_machine == NULL) {
-        s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
-        if (s_probe_machine == NULL) {
-            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine (%zu bytes, free=%lu largest=%lu)",
-                     sizeof(*s_probe_machine),
-                     (unsigned long)esp_get_free_heap_size(),
-                     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-            return INT_MIN / 2;
-        }
+        ESP_LOGW(TAG, "Skipping .dsk deep probe: no probe machine available");
+        return INT_MIN / 2;
     }
     probe = s_probe_machine;
 
@@ -1690,6 +1685,7 @@ void app_sd_init(apple2_machine_t *machine,
     s_restore_builtin = restore_builtin;
     s_flush = flush;
     s_callback_ctx = callback_ctx;
+    s_probe_machine = machine;  /* borrow main machine for .dsk order probing */
 
     ESP_LOGI(TAG, "Free heap before SD init: %lu bytes (largest block: %lu)",
              (unsigned long)esp_get_free_heap_size(),
