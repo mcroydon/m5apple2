@@ -79,30 +79,11 @@ static esp_err_t es8311_write_reg(uint8_t reg, uint8_t value)
 
 static esp_err_t es8311_init(void)
 {
-    const i2c_config_t i2c_cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = ES8311_I2C_SDA_GPIO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = ES8311_I2C_SCL_GPIO,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = ES8311_I2C_HZ,
-        .clk_flags = 0,
-    };
     esp_err_t err;
 
-    err = i2c_driver_install(ES8311_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
-    if (err == ESP_ERR_INVALID_STATE) {
-        /* I2C bus already initialized (keyboard driver). Reuse it. */
-        ESP_LOGI(TAG, "Reusing existing I2C bus for ES8311");
-    } else if (err == ESP_OK) {
-        /* We're the first to init — configure the bus pins. */
-        err = i2c_param_config(ES8311_I2C_PORT, &i2c_cfg);
-        if (err != ESP_OK) {
-            return err;
-        }
-    } else {
-        return err;
-    }
+    /* The keyboard driver already initializes I2C_NUM_0 on the ADV.
+       Reuse the existing bus — do not call i2c_driver_install again
+       (ESP-IDF v5.4 returns ESP_FAIL for duplicate installs). */
 
     /* Probe the codec — if the first write NACKs, the ES8311 is not
        present or not responding.  Bail out to avoid disrupting the
