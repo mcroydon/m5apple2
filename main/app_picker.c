@@ -310,9 +310,7 @@ void app_picker_render(apple2_machine_t *machine)
     snprintf(line, sizeof(line), "SD DISK PICKER DRIVE %u", drive + 1U);
     picker_puts_at(machine, 0, 0, line);
     picker_puts_at(machine, 1, 0, "I/K MOVE  ENTER SELECT");
-    picker_puts_at(machine, 2, 0, s_picker.path_depth > 0U
-                      ? "ESC BACK  FN+0 RESCAN"
-                      : "ESC CANCEL  FN+0 RESCAN");
+    picker_puts_at(machine, 2, 0, "ESC CANCEL  FN+0 RESCAN");
     picker_puts_at(machine, 3, 0, "FN+3/4 ORDER  FN+5/6 DRIVE");
 
     {
@@ -444,20 +442,6 @@ void app_picker_handle_key(uint8_t ascii, apple2_machine_t *machine)
 {
     switch (ascii) {
     case 0x1BU:
-        if (s_picker.path_depth > 0U) {
-            char *last_slash = strrchr(s_picker.browse_path, '/');
-            if (last_slash != NULL && last_slash != s_picker.browse_path) {
-                *last_slash = '\0';
-            }
-            s_picker.path_depth--;
-            app_sd_scan_directory(s_picker.browse_path);
-            s_picker.selected_item = 0;
-            s_picker.scroll_item = 0;
-            picker_set_status(NULL);
-            picker_sync_scroll();
-            app_picker_render(machine);
-            return;
-        }
         app_picker_close(machine);
         return;
     case '\r': {
