@@ -547,7 +547,10 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
     if (s_probe_machine == NULL) {
         s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
         if (s_probe_machine == NULL) {
-            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine");
+            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine (%zu bytes, free=%lu largest=%lu)",
+                     sizeof(*s_probe_machine),
+                     (unsigned long)esp_get_free_heap_size(),
+                     (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
             return INT_MIN / 2;
         }
     }
@@ -1688,11 +1691,13 @@ void app_sd_init(apple2_machine_t *machine,
     s_flush = flush;
     s_callback_ctx = callback_ctx;
 
-    ESP_LOGI(TAG, "Free heap before SD init: %lu bytes",
-             (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Free heap before SD init: %lu bytes (largest block: %lu)",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
     app_sd_rescan(machine);
-    ESP_LOGI(TAG, "Free heap after SD init: %lu bytes",
-             (unsigned long)esp_get_free_heap_size());
+    ESP_LOGI(TAG, "Free heap after SD init: %lu bytes (largest block: %lu)",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 }
 
 #endif /* ESP_PLATFORM */
