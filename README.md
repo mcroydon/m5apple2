@@ -207,13 +207,13 @@ python "$IDF_PATH/tools/idf.py" -p PORT build flash monitor
 Build for the Cardputer ADV configuration:
 
 ```sh
-python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" build
+python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG=build-adv/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" build
 ```
 
 Flash and monitor the ADV build:
 
 ```sh
-python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" -p PORT build flash monitor
+python "$IDF_PATH/tools/idf.py" -B build-adv -DSDKCONFIG=build-adv/sdkconfig -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.adv" -p PORT build flash monitor
 ```
 
 The ADV build uses a separate build directory (`build-adv`) with its own generated
