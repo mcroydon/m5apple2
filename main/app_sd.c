@@ -1683,7 +1683,11 @@ void app_sd_init(apple2_machine_t *machine,
     s_flush = flush;
     s_callback_ctx = callback_ctx;
 
+    ESP_LOGI(TAG, "Free heap before SD init: %lu bytes",
+             (unsigned long)esp_get_free_heap_size());
     app_sd_rescan(machine);
+    ESP_LOGI(TAG, "Free heap after SD init: %lu bytes",
+             (unsigned long)esp_get_free_heap_size());
 }
 
 #endif /* ESP_PLATFORM */
