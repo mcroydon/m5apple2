@@ -866,16 +866,6 @@ void app_main(void)
 
     apple2_machine_init(&s_machine, &apple2_config);
 
-    /* Pre-allocate the sector image cache before display/keyboard init
-       fragment the heap with DMA buffers. */
-    ESP_LOGI(TAG, "Heap before cache alloc: free=%lu largest=%lu",
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-    app_sd_pre_allocate_cache();
-    ESP_LOGI(TAG, "Heap after cache alloc: free=%lu largest=%lu",
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-
     ESP_ERROR_CHECK(cardputer_display_init(&s_display));
     ESP_ERROR_CHECK(cardputer_keyboard_init());
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
@@ -885,14 +875,9 @@ void app_main(void)
     slot6_loaded = app_load_slot6_rom();
     drive0_loaded = app_load_drive0_image();
 
-    /* SD init before audio: the .dsk probe machine (74 KB) and sector
-       image cache (143 KB) need large contiguous heap blocks.  I2S DMA
-       buffers fragment the heap, so do the big allocations first. */
-    app_sd_init(&s_machine,
-                app_sd_restore_builtin_callback,
-                app_sd_flush_callback,
-                &s_machine);
-
+    /* Audio before SD: I2S DMA buffers are small (~8 KB) and must
+       succeed.  The sector cache pre-allocation inside app_sd_init
+       takes whatever contiguous heap remains after DMA is done. */
 #if CONFIG_M5APPLE2_AUDIO_ENABLED
     cardputer_audio_t *audio = cardputer_audio_init();
     if (audio != NULL) {
@@ -900,6 +885,12 @@ void app_main(void)
         ESP_LOGI(TAG, "Audio output enabled");
     }
 #endif
+
+    app_sd_init(&s_machine,
+                app_sd_restore_builtin_callback,
+                app_sd_flush_callback,
+                &s_machine);
+
     if (rom_loaded && !slot6_loaded) {
         ESP_LOGW(TAG, "System ROM loaded without a separate Disk II ROM");
     }
