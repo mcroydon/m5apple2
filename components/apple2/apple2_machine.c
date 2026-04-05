@@ -343,8 +343,10 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
 {
     apple2_machine_t *machine = context;
 
+    /* Fast path: ~99% of reads are to RAM below the I/O space. */
     if (address < 0xC000U) {
-        return apple2_bus_value(machine, machine->memory[address]);
+        machine->floating_bus = machine->memory[address];
+        return machine->memory[address];
     }
     if (address >= APPLE2_ROM_BASE) {
         return apple2_bus_value(machine, machine->memory[address]);
@@ -356,7 +358,7 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
         return apple2_bus_value(machine, machine->memory[address]);
     }
 
-    if (address >= 0xC000U && address <= 0xC00FU) {
+    if (address <= 0xC00FU) {
         return apple2_bus_value(machine, machine->key_latch);
     }
     if (address >= 0xC010U && address <= 0xC01FU) {
@@ -461,14 +463,15 @@ static uint8_t apple2_bus_read(void *context, uint16_t address)
 static void apple2_bus_write(void *context, uint16_t address, uint8_t value)
 {
     apple2_machine_t *machine = context;
-    machine->floating_bus = value;
-
+    /* Fast path: most writes are to RAM below the I/O space. */
     if (address < 0xC000U) {
         machine->memory[address] = value;
         return;
     }
 
-    if (address >= 0xC000U && address <= 0xC00FU) {
+    machine->floating_bus = value;
+
+    if (address <= 0xC00FU) {
         return;
     }
     if (address >= 0xC010U && address <= 0xC01FU) {

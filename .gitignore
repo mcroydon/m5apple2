@@ -8,6 +8,9 @@ compile_commands.json
 tests/apple2_core_tests
 tests/cardputer_keymap_tests
 tests/apple2_rom_smoke
+tests/apple2_bench
 main/generated_assets/
 roms/*
 disks/*
+.cache/*
+.claude/*

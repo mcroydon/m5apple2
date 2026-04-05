@@ -137,6 +137,9 @@ static bool cardputer_keymap_command_modifier_active(uint64_t pressed_mask)
 static bool cardputer_keymap_fn_ascii_for_char(uint8_t normal, uint8_t *ascii)
 {
     switch (normal) {
+    case '`':
+        *ascii = 0x1BU; /* ESC */
+        return true;
     case '0':
         *ascii = CARDPUTER_INPUT_CMD_SD_RESCAN;
         return true;

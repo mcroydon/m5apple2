@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "app_main.c"
+    SRCS "app_main.c" "app_perf.c" "app_picker.c" "app_sd.c"
     REQUIRES apple2 cardputer esp_timer fatfs sdmmc esp_driver_sdspi
 )
 

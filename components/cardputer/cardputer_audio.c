@@ -8,8 +8,9 @@
 #include "driver/i2s_std.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
 
-#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 #include "driver/i2c.h"
 #endif
 
@@ -36,29 +37,22 @@
  * ES8311 codec configuration (Original variant only).
  * The ES8311 requires I2C register setup before I2S data flows.
  */
-#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 #define ES8311_I2C_PORT    I2C_NUM_0
 #define ES8311_I2C_ADDR    0x18U
 #define ES8311_I2C_HZ      100000U
-#define ES8311_I2C_SDA_GPIO 13
-#define ES8311_I2C_SCL_GPIO 14
+#define ES8311_I2C_SDA_GPIO 8
+#define ES8311_I2C_SCL_GPIO 9
 
 /* ES8311 register addresses */
 #define ES8311_REG_RESET        0x00U
 #define ES8311_REG_CLK_MANAGER1 0x01U
 #define ES8311_REG_CLK_MANAGER2 0x02U
-#define ES8311_REG_CLK_MANAGER3 0x03U
-#define ES8311_REG_CLK_MANAGER4 0x04U
-#define ES8311_REG_CLK_MANAGER5 0x05U
-#define ES8311_REG_CLK_MANAGER6 0x06U
-#define ES8311_REG_CLK_MANAGER7 0x07U
-#define ES8311_REG_CLK_MANAGER8 0x08U
-#define ES8311_REG_SDP_IN       0x09U
-#define ES8311_REG_SDP_OUT      0x0AU
 #define ES8311_REG_SYSTEM       0x0DU
-#define ES8311_REG_ADC1         0x17U
+#define ES8311_REG_SYSTEM2      0x12U
+#define ES8311_REG_SYSTEM3      0x13U
 #define ES8311_REG_DAC1         0x32U
-#define ES8311_REG_GPIO         0x44U
+#define ES8311_REG_DAC2         0x37U
 #endif
 
 static const char *TAG = "cardputer_audio";
@@ -72,7 +66,7 @@ struct cardputer_audio {
     i2s_chan_handle_t i2s_handle;
 };
 
-#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
 static esp_err_t es8311_write_reg(uint8_t reg, uint8_t value)
 {
     const uint8_t payload[2] = { reg, value };
@@ -86,85 +80,61 @@ static esp_err_t es8311_write_reg(uint8_t reg, uint8_t value)
 
 static esp_err_t es8311_init(void)
 {
-    const i2c_config_t i2c_cfg = {
-        .mode = I2C_MODE_MASTER,
-        .sda_io_num = ES8311_I2C_SDA_GPIO,
-        .sda_pullup_en = GPIO_PULLUP_ENABLE,
-        .scl_io_num = ES8311_I2C_SCL_GPIO,
-        .scl_pullup_en = GPIO_PULLUP_ENABLE,
-        .master.clk_speed = ES8311_I2C_HZ,
-        .clk_flags = 0,
-    };
     esp_err_t err;
 
-    err = i2c_param_config(ES8311_I2C_PORT, &i2c_cfg);
-    if (err != ESP_OK) {
-        return err;
-    }
+    /* The keyboard driver already initializes I2C_NUM_0 on the ADV.
+       Reuse the existing bus — do not call i2c_driver_install again
+       (ESP-IDF v5.4 returns ESP_FAIL for duplicate installs). */
 
-    err = i2c_driver_install(ES8311_I2C_PORT, I2C_MODE_MASTER, 0, 0, 0);
-    if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
-        return err;
-    }
-
-    /* Reset the codec. */
+    /* Probe the codec — if the first write NACKs, the ES8311 is not
+       present or not responding.  Bail out to avoid disrupting the
+       shared I2C bus (TCA8418 keyboard controller). */
     err = es8311_write_reg(ES8311_REG_RESET, 0x80U);
     if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ES8311 not responding at 0x%02X: %s",
+                 ES8311_I2C_ADDR, esp_err_to_name(err));
         return err;
     }
-    err = es8311_write_reg(ES8311_REG_RESET, 0x00U);
+
+    /* Clock manager: derive MCLK from BCLK (no MCLK pin on ADV),
+       enable MCLK/BCLK/DAC clocks, disable ADC clocks. */
+    err = es8311_write_reg(ES8311_REG_CLK_MANAGER1, 0xB5U);
     if (err != ESP_OK) {
         return err;
     }
 
-    /* Clock manager: use MCLK from I2S BCLK, auto-detect ratio. */
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER1, 0x30U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER2, 0x00U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER3, 0x10U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER4, 0x10U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER5, 0x00U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER6, 0x00U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER7, 0x00U);
-    if (err != ESP_OK) {
-        return err;
-    }
-    err = es8311_write_reg(ES8311_REG_CLK_MANAGER8, 0x00U);
+    /* PLL: pre_div=1, pre_multi=8x (multiply BCLK by 8). */
+    err = es8311_write_reg(ES8311_REG_CLK_MANAGER2, 0x18U);
     if (err != ESP_OK) {
         return err;
     }
 
-    /* SDP: 16-bit I2S format for DAC input. */
-    err = es8311_write_reg(ES8311_REG_SDP_IN, 0x0CU);
+    /* Power up analog circuitry. */
+    err = es8311_write_reg(ES8311_REG_SYSTEM, 0x01U);
     if (err != ESP_OK) {
         return err;
     }
 
-    /* System: power up DAC. */
-    err = es8311_write_reg(ES8311_REG_SYSTEM, 0x00U);
+    /* Power up DAC. */
+    err = es8311_write_reg(ES8311_REG_SYSTEM2, 0x00U);
     if (err != ESP_OK) {
         return err;
     }
 
-    /* DAC volume: moderate level. */
+    /* Enable headphone driver output. */
+    err = es8311_write_reg(ES8311_REG_SYSTEM3, 0x10U);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* DAC volume: 0 dB. */
     err = es8311_write_reg(ES8311_REG_DAC1, 0xBFU);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    /* Bypass DAC equalizer. */
+    err = es8311_write_reg(ES8311_REG_DAC2, 0x08U);
     if (err != ESP_OK) {
         return err;
     }
@@ -172,7 +142,7 @@ static esp_err_t es8311_init(void)
     ESP_LOGI(TAG, "ES8311 codec initialized");
     return ESP_OK;
 }
-#endif /* CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL */
+#endif /* CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV */
 
 cardputer_audio_t *cardputer_audio_init(void)
 {
@@ -223,13 +193,6 @@ cardputer_audio_t *cardputer_audio_init(void)
         return NULL;
     }
 
-#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ORIGINAL
-    err = es8311_init();
-    if (err != ESP_OK) {
-        ESP_LOGW(TAG, "ES8311 init failed: %s (audio may not work)", esp_err_to_name(err));
-    }
-#endif
-
     err = i2s_channel_enable(audio->i2s_handle);
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "i2s_channel_enable failed: %s", esp_err_to_name(err));
@@ -237,6 +200,17 @@ cardputer_audio_t *cardputer_audio_init(void)
         free(audio);
         return NULL;
     }
+
+    /* ES8311 codec init must happen AFTER I2S is enabled so
+       the PLL can lock onto the running BCLK signal. */
+#if CONFIG_M5APPLE2_CARDPUTER_VARIANT_ADV
+    err = es8311_init();
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "ES8311 init failed: %s (trying without codec)", esp_err_to_name(err));
+    } else {
+        ESP_LOGI(TAG, "ES8311 codec initialized");
+    }
+#endif
 
     ESP_LOGI(TAG, "Audio output ready: %d Hz, buffer %d samples",
              CONFIG_M5APPLE2_AUDIO_SAMPLE_RATE,
