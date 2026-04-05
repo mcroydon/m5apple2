@@ -548,12 +548,8 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
     bool entered_stage2 = false;
 
     if (s_probe_machine == NULL) {
-        s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
-        if (s_probe_machine == NULL) {
-            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine (%zu bytes)",
-                     sizeof(*s_probe_machine));
-            return INT_MIN / 2;
-        }
+        ESP_LOGW(TAG, "Skipping .dsk deep probe: no probe machine available");
+        return INT_MIN / 2;
     }
     probe = s_probe_machine;
 
@@ -1729,20 +1725,24 @@ app_sd_perf_t app_sd_perf_read(bool reset)
 
 void app_sd_pre_allocate_cache(void)
 {
-    if (s_shared_sector_cache != NULL) {
-        return;
+    /* Allocate large buffers early, before display/audio DMA fragments
+       the heap.  These need contiguous blocks that won't be available
+       after DMA descriptors split the free space. */
+    if (s_shared_sector_cache == NULL) {
+        s_shared_sector_cache = malloc(APPLE2_DISK2_IMAGE_SIZE);
+        if (s_shared_sector_cache != NULL) {
+            ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache", (unsigned)APPLE2_DISK2_IMAGE_SIZE);
+        }
     }
-    s_shared_sector_cache = malloc(APPLE2_DISK2_IMAGE_SIZE);
-    if (s_shared_sector_cache != NULL) {
-        ESP_LOGI(TAG, "Pre-allocated %u-byte sector cache (free=%lu largest=%lu)",
-                 (unsigned)APPLE2_DISK2_IMAGE_SIZE,
-                 (unsigned long)esp_get_free_heap_size(),
-                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
-    } else {
-        ESP_LOGW(TAG, "Sector cache alloc failed (free=%lu largest=%lu)",
-                 (unsigned long)esp_get_free_heap_size(),
-                 (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    if (s_probe_machine == NULL) {
+        s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
+        if (s_probe_machine != NULL) {
+            ESP_LOGI(TAG, "Pre-allocated %u-byte probe machine", (unsigned)sizeof(*s_probe_machine));
+        }
     }
+    ESP_LOGI(TAG, "Heap after pre-alloc: free=%lu largest=%lu",
+             (unsigned long)esp_get_free_heap_size(),
+             (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
 }
 
 void app_sd_init(apple2_machine_t *machine,
