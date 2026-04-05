@@ -548,8 +548,12 @@ static int app_score_dsk_order_source(const app_disk_source_t *source,
     bool entered_stage2 = false;
 
     if (s_probe_machine == NULL) {
-        ESP_LOGW(TAG, "Skipping .dsk deep probe: no probe machine available");
-        return INT_MIN / 2;
+        s_probe_machine = calloc(1U, sizeof(*s_probe_machine));
+        if (s_probe_machine == NULL) {
+            ESP_LOGW(TAG, "Skipping .dsk deep probe: no room for probe machine (%zu bytes)",
+                     sizeof(*s_probe_machine));
+            return INT_MIN / 2;
+        }
     }
     probe = s_probe_machine;
 
@@ -1317,8 +1321,10 @@ void app_sd_close_drive(apple2_machine_t *machine, unsigned drive_index)
     }
     s_sd_drive_files[drive_index].type = APP_DISK_IMAGE_NONE;
     s_sd_drive_files[drive_index].image_order = APPLE2_DISK2_IMAGE_ORDER_DOS33_LOGICAL;
-    /* Keep the pre-allocated image buffer for reuse — freeing it risks
-       heap fragmentation preventing re-allocation on the next mount. */
+    if (s_sd_drive_files[drive_index].image_data != s_shared_sector_cache) {
+        free(s_sd_drive_files[drive_index].image_data);
+    }
+    s_sd_drive_files[drive_index].image_data = NULL;
     s_sd_drive_files[drive_index].image_size = 0U;
     s_sd_drive_files[drive_index].sector_track_valid = false;
     free(s_sd_drive_files[drive_index].sector_track_data);
@@ -1747,7 +1753,9 @@ void app_sd_init(apple2_machine_t *machine,
     s_restore_builtin = restore_builtin;
     s_flush = flush;
     s_callback_ctx = callback_ctx;
-    s_probe_machine = machine;  /* borrow main machine for .dsk order probing */
+    /* Probe machine is allocated on demand in app_score_dsk_order_source.
+       Do NOT borrow the main machine — the probe reinitializes it,
+       wiping speaker callbacks, ROM data, and other state. */
 
 
     ESP_LOGI(TAG, "Free heap before SD init: %lu bytes (largest block: %lu)",
