@@ -871,6 +871,13 @@ void app_main(void)
     ESP_LOGI(TAG, "Cardputer display ready: %" PRIu16 "x%" PRIu16,
              s_display.native_width, s_display.native_height);
 
+    rom_loaded = app_load_system_rom();
+    slot6_loaded = app_load_slot6_rom();
+    drive0_loaded = app_load_drive0_image();
+
+    /* Audio before SD: I2S DMA buffers are small (~8 KB) and must
+       succeed.  The sector cache pre-allocation inside app_sd_init
+       takes whatever contiguous heap remains after DMA is done. */
 #if CONFIG_M5APPLE2_AUDIO_ENABLED
     cardputer_audio_t *audio = cardputer_audio_init();
     if (audio != NULL) {
@@ -879,9 +886,6 @@ void app_main(void)
     }
 #endif
 
-    rom_loaded = app_load_system_rom();
-    slot6_loaded = app_load_slot6_rom();
-    drive0_loaded = app_load_drive0_image();
     app_sd_init(&s_machine,
                 app_sd_restore_builtin_callback,
                 app_sd_flush_callback,
