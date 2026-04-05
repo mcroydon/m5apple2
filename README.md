@@ -7,27 +7,28 @@ It is aimed at practical, on-device use: provide your own ROMs and disk images,
 flash the firmware, mount a disk from the keyboard, and boot straight into DOS
 or an application on the built-in LCD.
 
-## Release 0.2 Status
+## Release 0.3 Status
 
 - Runs on both the original Cardputer and the Cardputer ADV
 - Boots user-supplied Apple II Plus ROMs and Disk II slot 6 software
 - Renders Apple II text, lo-res, and hi-res graphics on the built-in display
-- Supports keyboard input, SD card image browsing, drive switching, and reboot
-  hotkeys on-device
-- Speaker audio output via I2S (working on original Cardputer; ADV audio not yet
-  functional)
+- Supports keyboard input, SD card image browsing with subdirectory navigation,
+  drive switching, and reboot hotkeys on-device
+- Speaker audio output via I2S on both variants (NS4168 on original, ES8311
+  codec on ADV)
 - Disk write support for SD-mounted sector images (`.do`, `.po`, `.dsk`), with
   automatic flush on motor-off, eject, and drive swap
-- Known-good on hardware with DOS 3.3 and VisiCalc disk images
+- Known-good on hardware with DOS 3.3, VisiCalc, Lemonade Stand, Choplifter,
+  Bard's Tale, Oregon Trail, and Prince of Persia disk images
 - Includes host-side regression tests for CPU, video, disk parsing, keyboard
-  mapping, and ROM boot smoke
+  mapping, ROM boot smoke, disk compatibility suite, and performance benchmark
 
 ## Quick Start
 
 1. Supply an Apple II Plus ROM at `roms/apple2plus.rom`
 2. Optionally supply `roms/disk2.rom`
-3. Put `.do`, `.po`, `.dsk`, `.nib`, or `.woz` images in the root of a
-   FAT-formatted SD card
+3. Put `.do`, `.po`, `.dsk`, `.nib`, or `.woz` images on a FAT-formatted SD
+   card (root or subdirectories)
 4. Build and flash for your device
 5. Use `Fn+5` / `Fn+6` to pick disks for drive 1 or drive 2
 6. Use `Fn+9` to cold-boot with the current mounts
@@ -40,7 +41,8 @@ speed setting.
 ### Basic Controls
 
 - `ESC`: reset the emulator
-- `GPIO0`: treated as `ESC` on the original Cardputer
+- `GPIO0`: treated as `ESC` on both variants
+- `Fn+backtick`: sends `ESC` on the ADV (the keyboard has no dedicated ESC key)
 - typing on the keyboard feeds the Apple II key latch directly
 
 ### Disk And Boot Controls
@@ -252,6 +254,18 @@ APPLE2_TEST_EXPECT_TEXT="DO YOU WANT TO USE 80 COLUMNS" \
 sh tests/run_rom_smoke.sh
 ```
 
+Run the disk compatibility suite (tests validated disk images in `disks/`):
+
+```sh
+sh tests/run_disk_compat.sh
+```
+
+Run the performance benchmark:
+
+```sh
+sh tests/run_bench.sh
+```
+
 The current host tests cover:
 
 - CPU core behavior (including BCD SBC flag correctness)
@@ -266,6 +280,10 @@ The current host tests cover:
 - eager track cache rebuild on seek
 - Cardputer keyboard translation
 - ROM boot smoke through DOS and prompt-side keyboard input
+- disk compatibility suite (VisiCalc, Lemonade Stand, Choplifter, Bard's Tale,
+  Oregon Trail, Prince of Persia)
+- ProDOS boot verification for `.po` images
+- host-side performance benchmark (MIPS, emulated MHz)
 
 ## Current Limitations
 
@@ -278,17 +296,14 @@ The current host tests cover:
 - Accelerated disk loading is still slower than ideal for large applications
 - Joystick and paddles return stub values (buttons unpressed, timers expired)
   but are not connected to physical input
-- SD browsing is root-only; there is no subdirectory browser yet
+- SD subdirectory browsing limited to 4 levels deep
 
 ## High-Level Backlog
 
-- More performance work in the 6502 interpreter and hot bus paths
-- Better Disk II compatibility for commercial and unusual disks
 - Disk write support for `.nib` and `.woz` images
 - Fuller `WOZ` support, especially beyond `TMAP` / `TRKS`
 - Joystick and paddle input from physical controls
-- More SD-card UX polish
-- More compatibility soak testing on both Cardputer variants
+- More compatibility soak testing with commercial and unusual disks
 
 ## License
 
