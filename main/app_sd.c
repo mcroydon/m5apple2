@@ -534,9 +534,8 @@ static bool app_attach_probe_drive(apple2_machine_t *probe,
 
 static void app_release_probe_machine(void)
 {
-    /* The probe machine is borrowed from the caller (s_machine) — don't free it.
-       Just clear the pointer so we don't use stale state. */
-    s_probe_machine = NULL;
+    /* Keep the pre-allocated probe machine for reuse — it was allocated
+       early when the heap was unfragmented and can't be reallocated later. */
 }
 
 static int app_score_dsk_order_source(const app_disk_source_t *source,
